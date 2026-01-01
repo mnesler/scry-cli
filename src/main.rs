@@ -27,26 +27,36 @@ struct App {
     scroll_state: ScrollbarState,
     show_menu: bool,
     menu_selected: usize,
+    banner_animation_frame: usize,
+    banner_animation_complete: bool,
 }
 
 impl App {
-    fn new() -> App {
-        let banner = r#"
+    fn get_banner() -> String {
+        // Using "WELCOME TO MIAMI" ASCII art
+        r#"
 ╔═══════════════════════════════════════════════════════════════════════════╗
 ║                                                                           ║
-║   ██╗    ██╗███████╗██╗      ██████╗ ██████╗ ███╗   ███╗███████╗██╗     ║
-║   ██║    ██║██╔════╝██║     ██╔════╝██╔═══██╗████╗ ████║██╔════╝██║     ║
-║   ██║ █╗ ██║█████╗  ██║     ██║     ██║   ██║██╔████╔██║█████╗  ██║     ║
-║   ██║███╗██║██╔══╝  ██║     ██║     ██║   ██║██║╚██╔╝██║██╔══╝  ╚═╝     ║
-║   ╚███╔███╔╝███████╗███████╗╚██████╗╚██████╔╝██║ ╚═╝ ██║███████╗██╗     ║
-║    ╚══╝╚══╝ ╚══════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚══════╝╚═╝     ║
+║   ██╗    ██╗███████╗██╗      ██████╗ ██████╗ ███╗   ███╗███████╗        ║
+║   ██║    ██║██╔════╝██║     ██╔════╝██╔═══██╗████╗ ████║██╔════╝        ║
+║   ██║ █╗ ██║█████╗  ██║     ██║     ██║   ██║██╔████╔██║█████╗          ║
+║   ██║███╗██║██╔══╝  ██║     ██║     ██║   ██║██║╚██╔╝██║██╔══╝          ║
+║   ╚███╔███╔╝███████╗███████╗╚██████╗╚██████╔╝██║ ╚═╝ ██║███████╗        ║
+║    ╚══╝╚══╝ ╚══════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚══════╝        ║
 ║                                                                           ║
-║              ██╗   ██╗███████╗███████╗██████╗ ██╗                        ║
-║              ██║   ██║██╔════╝██╔════╝██╔══██╗██║                        ║
-║              ██║   ██║███████╗█████╗  ██████╔╝██║                        ║
-║              ██║   ██║╚════██║██╔══╝  ██╔══██╗╚═╝                        ║
-║              ╚██████╔╝███████║███████╗██║  ██║██╗                        ║
-║               ╚═════╝ ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝                        ║
+║                ████████╗ ██████╗     ███╗   ███╗██╗                      ║
+║                ╚══██╔══╝██╔═══██╗    ████╗ ████║██║                      ║
+║                   ██║   ██║   ██║    ██╔████╔██║██║                      ║
+║                   ██║   ██║   ██║    ██║╚██╔╝██║██║                      ║
+║                   ██║   ╚██████╔╝    ██║ ╚═╝ ██║██║                      ║
+║                   ╚═╝    ╚═════╝     ╚═╝     ╚═╝╚═╝                      ║
+║                                                                           ║
+║              ███╗   ███╗██╗ █████╗ ███╗   ███╗██╗                        ║
+║              ████╗ ████║██║██╔══██╗████╗ ████║██║                        ║
+║              ██╔████╔██║██║███████║██╔████╔██║██║                        ║
+║              ██║╚██╔╝██║██║██╔══██║██║╚██╔╝██║██║                        ║
+║              ██║ ╚═╝ ██║██║██║  ██║██║ ╚═╝ ██║██║                        ║
+║              ╚═╝     ╚═╝╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝                        ║
 ║                                                                           ║
 ║   ════════════════════════════════════════════════════════════════════   ║
 ║                                                                           ║
@@ -58,13 +68,17 @@ impl App {
 ║        🚀 Built with Rust, Ratatui, and Miami vibes                      ║
 ║                                                                           ║
 ╚═══════════════════════════════════════════════════════════════════════════╝
-"#;
+"#.to_string()
+    }
+
+    fn new() -> App {
+        let banner = Self::get_banner();
 
         App {
             messages: vec![
                 Message {
                     role: "assistant".to_string(),
-                    content: banner.to_string(),
+                    content: banner,
                 }
             ],
             input: String::new(),
@@ -73,6 +87,8 @@ impl App {
             scroll_state: ScrollbarState::default(),
             show_menu: false,
             menu_selected: 0,
+            banner_animation_frame: 0,
+            banner_animation_complete: false,
         }
     }
 
@@ -205,10 +221,21 @@ fn run_app<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
 ) -> io::Result<()> {
+    use std::time::Duration;
+
     loop {
         terminal.draw(|f| ui(f, app))?;
 
-        if let Event::Key(key) = event::read()? {
+        // Use timeout for animation: fast polling during animation, blocking when done
+        let timeout = if !app.banner_animation_complete {
+            Duration::from_millis(16) // ~60 FPS during animation
+        } else {
+            Duration::from_millis(100) // Slower polling when idle
+        };
+
+        // Poll for events with timeout
+        if event::poll(timeout)? {
+            if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
                 // Global shortcuts (work in both menu and normal mode)
                 match key.code {
@@ -301,7 +328,9 @@ fn run_app<B: ratatui::backend::Backend>(
                     }
                 }
             }
+            }
         }
+        // If no event, loop continues and redraws (for animation)
     }
 }
 
@@ -329,6 +358,51 @@ fn gradient_block(title: &str, _area: Rect, start_color: (u8, u8, u8), end_color
         ))
 }
 
+// Apply Miami gradient colors to a line of text
+fn apply_miami_gradient_to_line(text: &str, line_index: usize) -> Line<'static> {
+    // Miami gradient colors
+    let miami_pink = (255, 0, 128);      // Hot pink
+    let miami_purple = (138, 43, 226);   // Blue violet
+    let miami_cyan = (0, 255, 255);      // Cyan
+    let miami_orange = (255, 140, 0);    // Dark orange
+
+    let chars: Vec<char> = text.chars().collect();
+    let total_chars = chars.len();
+
+    if total_chars == 0 {
+        return Line::from("");
+    }
+
+    let mut spans = Vec::new();
+
+    for (i, ch) in chars.iter().enumerate() {
+        // Calculate gradient position based on character position and line
+        let position = (i as f32 / total_chars.max(1) as f32 + line_index as f32 * 0.1) % 1.0;
+
+        // Cycle through Miami colors
+        let color = if position < 0.25 {
+            gradient_color(miami_pink, miami_purple, position * 4.0)
+        } else if position < 0.5 {
+            gradient_color(miami_purple, miami_cyan, (position - 0.25) * 4.0)
+        } else if position < 0.75 {
+            gradient_color(miami_cyan, miami_orange, (position - 0.5) * 4.0)
+        } else {
+            gradient_color(miami_orange, miami_pink, (position - 0.75) * 4.0)
+        };
+
+        // Make box drawing and block characters bold for emphasis
+        let style = if matches!(ch, '█' | '╔' | '╗' | '╚' | '╝' | '║' | '═' | '╠' | '╣' | '╦' | '╩' | '╬') {
+            Style::default().fg(color).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(color)
+        };
+
+        spans.push(Span::styled(ch.to_string(), style));
+    }
+
+    Line::from(spans)
+}
+
 fn ui(f: &mut ratatui::Frame, app: &mut App) {
     // Create layout: chat area (top) and input area (bottom)
     let chunks = Layout::default()
@@ -343,16 +417,32 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
     let total_messages = app.messages.len();
     app.update_scroll_state(total_messages);
 
+    // Increment animation frame if banner animation is not complete
+    if !app.banner_animation_complete && app.messages.len() > 0 {
+        let banner_len = app.messages[0].content.len();
+        if app.banner_animation_frame < banner_len {
+            app.banner_animation_frame += 3; // Reveal 3 characters per frame for faster animation
+        } else {
+            app.banner_animation_complete = true;
+        }
+    }
+
     // Render chat messages (skip based on scroll offset)
+    let is_first_message = app.scroll_offset == 0;
     let messages: Vec<ListItem> = app
         .messages
         .iter()
+        .enumerate()
         .skip(app.scroll_offset)
-        .flat_map(|msg| {
-            let style = if msg.role == "user" {
-                Style::default().fg(Color::Cyan)
+        .flat_map(|(msg_idx, msg)| {
+            let is_banner = msg_idx == 0 && is_first_message;
+
+            // Apply Miami gradient to banner, regular colors to other messages
+            let message_content = if is_banner && !app.banner_animation_complete {
+                // Animated reveal: only show characters up to current frame
+                msg.content.chars().take(app.banner_animation_frame).collect::<String>()
             } else {
-                Style::default().fg(Color::Green)
+                msg.content.clone()
             };
 
             let role_prefix = if msg.role == "user" {
@@ -362,29 +452,44 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
             };
 
             // Wrap long messages
-            let wrapped_lines = wrap_text(&msg.content, chunks[0].width.saturating_sub(4) as usize);
+            let wrapped_lines = wrap_text(&message_content, chunks[0].width.saturating_sub(4) as usize);
 
             let mut items = Vec::new();
             for (i, line) in wrapped_lines.iter().enumerate() {
-                if i == 0 {
-                    items.push(
-                        ListItem::new(Line::from(vec![
-                            Span::styled(role_prefix, style.add_modifier(Modifier::BOLD)),
-                            Span::styled(line.clone(), style),
-                        ]))
-                    );
+                if is_banner {
+                    // Apply Miami gradient to banner (no role prefix)
+                    let miami_line = apply_miami_gradient_to_line(line, i);
+                    items.push(ListItem::new(miami_line));
                 } else {
-                    items.push(
-                        ListItem::new(Line::from(Span::styled(
-                            format!("         {}", line),
-                            style,
-                        )))
-                    );
+                    // Regular message styling
+                    let style = if msg.role == "user" {
+                        Style::default().fg(Color::Cyan)
+                    } else {
+                        Style::default().fg(Color::Green)
+                    };
+
+                    if i == 0 {
+                        items.push(
+                            ListItem::new(Line::from(vec![
+                                Span::styled(role_prefix, style.add_modifier(Modifier::BOLD)),
+                                Span::styled(line.clone(), style),
+                            ]))
+                        );
+                    } else {
+                        items.push(
+                            ListItem::new(Line::from(Span::styled(
+                                format!("         {}", line),
+                                style,
+                            )))
+                        );
+                    }
                 }
             }
 
             // Add empty line between messages
-            items.push(ListItem::new(Line::from("")));
+            if !is_banner {
+                items.push(ListItem::new(Line::from("")));
+            }
             items
         })
         .collect();
