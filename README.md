@@ -7,10 +7,8 @@ A beautiful terminal-based chat interface built with Rust and Ratatui, featuring
 - 🎨 **Gradient Borders** - Purple→Blue chat area, Green→Cyan input area
 - 📜 **Scrolling Support** - Navigate chat history with arrow keys, Page Up/Down, Home/End
 - 📊 **Visual Scrollbar** - Gradient-colored scrollbar showing current position
-- 🔗 **Clickable Hyperlinks** - Auto-detects terminal capabilities, makes URLs clickable in Kitty, GNOME Terminal, etc.
 - ⌨️ **Interactive Input** - Full cursor support with backspace and arrow navigation
 - 🎯 **Echo Bot** - Responds to your messages (easily replaceable with AI/API calls)
-- 🖥️ **Cross-Terminal Compatible** - Works everywhere with graceful degradation
 
 ## Installation
 
@@ -89,7 +87,6 @@ chat-cli/
 ├── Cargo.toml                         # Dependencies
 ├── gradient_presets.md                # Color presets
 ├── SCROLLING.md                       # Scrolling documentation
-├── HYPERLINKS.md                      # Hyperlink feature documentation
 └── README.md                          # This file
 ```
 
