@@ -12,6 +12,45 @@ use ratatui::{
     Terminal,
 };
 use std::io;
+use std::env;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TerminalCapabilities {
+    Kitty,      // Kitty terminal with all features
+    Modern,     // GNOME Terminal, Alacritty, iTerm2, etc.
+    Basic,      // Standard xterm/fallback
+}
+
+impl TerminalCapabilities {
+    fn detect() -> Self {
+        let term = env::var("TERM").unwrap_or_default();
+        let term_program = env::var("TERM_PROGRAM").unwrap_or_default();
+
+        if term.contains("kitty") {
+            TerminalCapabilities::Kitty
+        } else if term.contains("256color")
+               || term.contains("xterm-256")
+               || term_program.contains("iTerm")
+               || term_program.contains("gnome-terminal")
+               || term_program.contains("vscode") {
+            TerminalCapabilities::Modern
+        } else {
+            TerminalCapabilities::Basic
+        }
+    }
+
+    fn supports_hyperlinks(&self) -> bool {
+        matches!(self, TerminalCapabilities::Kitty | TerminalCapabilities::Modern)
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            TerminalCapabilities::Kitty => "Kitty",
+            TerminalCapabilities::Modern => "Modern",
+            TerminalCapabilities::Basic => "Basic",
+        }
+    }
+}
 
 #[derive(Clone)]
 struct Message {
@@ -25,21 +64,40 @@ struct App {
     cursor_position: usize,
     scroll_offset: usize,
     scroll_state: ScrollbarState,
+    terminal_caps: TerminalCapabilities,
 }
 
 impl App {
     fn new() -> App {
+        let terminal_caps = TerminalCapabilities::detect();
+
+        let welcome_msg = if terminal_caps.supports_hyperlinks() {
+            format!(
+                "Hello! I'm an echo bot. Type something and I'll repeat it back to you.\n\n\
+                Terminal: {} (hyperlinks enabled ✓)\n\
+                Try typing a URL like https://github.com to see clickable links!",
+                terminal_caps.name()
+            )
+        } else {
+            format!(
+                "Hello! I'm an echo bot. Type something and I'll repeat it back to you.\n\n\
+                Terminal: {} (basic mode)",
+                terminal_caps.name()
+            )
+        };
+
         App {
             messages: vec![
                 Message {
                     role: "assistant".to_string(),
-                    content: "Hello! I'm an echo bot. Type something and I'll repeat it back to you.".to_string(),
+                    content: welcome_msg,
                 }
             ],
             input: String::new(),
             cursor_position: 0,
             scroll_offset: 0,
             scroll_state: ScrollbarState::default(),
+            terminal_caps,
         }
     }
 
@@ -232,6 +290,67 @@ fn gradient_block(title: &str, _area: Rect, start_color: (u8, u8, u8), end_color
         ))
 }
 
+// Create a clickable hyperlink using OSC 8 escape codes
+fn make_hyperlink(url: &str, text: &str) -> String {
+    format!("\x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\", url, text)
+}
+
+// Process text to make URLs clickable
+fn linkify_text(text: &str, supports_hyperlinks: bool) -> String {
+    if !supports_hyperlinks {
+        return text.to_string();
+    }
+
+    let mut result = String::new();
+    let mut last_end = 0;
+
+    // Simple URL detection regex pattern (basic implementation)
+    let url_patterns = [
+        ("https://", "https://"),
+        ("http://", "http://"),
+    ];
+
+    let mut urls_found: Vec<(usize, usize, String)> = Vec::new();
+
+    // Find all URLs in the text
+    for (prefix, _) in &url_patterns {
+        let mut search_start = 0;
+        while let Some(start) = text[search_start..].find(prefix) {
+            let actual_start = search_start + start;
+            let remaining = &text[actual_start..];
+
+            // Find the end of the URL (space, newline, or end of string)
+            let end_pos = remaining
+                .find(|c: char| c.is_whitespace() || c == ')' || c == ']' || c == '>')
+                .unwrap_or(remaining.len());
+
+            let url = &remaining[..end_pos];
+            urls_found.push((actual_start, actual_start + end_pos, url.to_string()));
+
+            search_start = actual_start + end_pos;
+        }
+    }
+
+    // Sort URLs by position
+    urls_found.sort_by_key(|&(start, _, _)| start);
+
+    // Build the result with clickable links
+    for (start, end, url) in urls_found {
+        // Add text before the URL
+        result.push_str(&text[last_end..start]);
+
+        // Add clickable link
+        result.push_str(&make_hyperlink(&url, &url));
+
+        last_end = end;
+    }
+
+    // Add remaining text
+    result.push_str(&text[last_end..]);
+
+    result
+}
+
 fn ui(f: &mut ratatui::Frame, app: &mut App) {
     // Create layout: chat area (top) and input area (bottom)
     let chunks = Layout::default()
@@ -247,6 +366,7 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
     app.update_scroll_state(total_messages);
 
     // Render chat messages (skip based on scroll offset)
+    let supports_hyperlinks = app.terminal_caps.supports_hyperlinks();
     let messages: Vec<ListItem> = app
         .messages
         .iter()
@@ -264,8 +384,11 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
                 "Assistant: "
             };
 
+            // Linkify URLs in the message content
+            let linkified_content = linkify_text(&msg.content, supports_hyperlinks);
+
             // Wrap long messages
-            let wrapped_lines = wrap_text(&msg.content, chunks[0].width.saturating_sub(4) as usize);
+            let wrapped_lines = wrap_text(&linkified_content, chunks[0].width.saturating_sub(4) as usize);
 
             let mut items = Vec::new();
             for (i, line) in wrapped_lines.iter().enumerate() {
