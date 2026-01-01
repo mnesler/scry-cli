@@ -2,7 +2,15 @@
 name = "chat-cli"
 version = "0.1.0"
 edition = "2021"
+description = "A beautiful terminal-based chat interface with gradient borders and smooth scrolling"
+license = "MIT"
+keywords = ["cli", "tui", "chat", "terminal", "ratatui"]
+categories = ["command-line-interface"]
 
 [dependencies]
 ratatui = "0.26"
 crossterm = "0.27"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+dirs = "5.0"

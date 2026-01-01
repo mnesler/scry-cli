@@ -1,0 +1,165 @@
+use ratatui::{
+    layout::{Constraint, Direction, Layout, Margin},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, Wrap},
+    Frame,
+};
+
+use crate::app::App;
+use crate::config::Config;
+use crate::message::Role;
+
+use super::gradient::{gradient_block, gradient_color};
+use super::menu::render_menu;
+use super::text::{apply_miami_gradient_to_line, wrap_text};
+
+/// Main UI rendering function.
+pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
+    let colors = &config.colors;
+    let behavior = &config.behavior;
+    let miami = colors.miami_colors();
+    let (chat_start, chat_end) = colors.chat_gradient();
+    let (input_start, input_end) = colors.input_gradient();
+
+    // Create layout: chat area (top) and input area (bottom)
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(3),    // Chat messages
+            Constraint::Length(3), // Input box
+        ])
+        .split(f.size());
+
+    // Update scroll state with total message count
+    let total_messages = app.messages.len();
+    app.update_scroll_state(total_messages);
+
+    // Increment animation frame if banner animation is not complete
+    if !app.banner_animation_complete && !app.messages.is_empty() {
+        let banner_len = app.messages[0].content.len();
+        if app.banner_animation_frame < banner_len {
+            app.banner_animation_frame += behavior.animation_chars_per_frame;
+        } else {
+            app.banner_animation_complete = true;
+        }
+    }
+
+    // Render chat messages (skip based on scroll offset)
+    let is_first_message = app.scroll_offset == 0;
+    let messages: Vec<ListItem> = app
+        .messages
+        .iter()
+        .enumerate()
+        .skip(app.scroll_offset)
+        .flat_map(|(msg_idx, msg)| {
+            let is_banner = msg_idx == 0 && is_first_message;
+
+            // Apply Miami gradient to banner, regular colors to other messages
+            let message_content = if is_banner && !app.banner_animation_complete {
+                // Animated reveal: only show characters up to current frame
+                msg.content
+                    .chars()
+                    .take(app.banner_animation_frame)
+                    .collect::<String>()
+            } else {
+                msg.content.clone()
+            };
+
+            let role_prefix = msg.role.prefix();
+
+            // Wrap long messages
+            let wrapped_lines =
+                wrap_text(&message_content, chunks[0].width.saturating_sub(4) as usize);
+
+            let mut items = Vec::new();
+            for (i, line) in wrapped_lines.iter().enumerate() {
+                if is_banner {
+                    // Apply Miami gradient to banner (no role prefix)
+                    let miami_line = apply_miami_gradient_to_line(line, i, &miami);
+                    items.push(ListItem::new(miami_line));
+                } else {
+                    // Regular message styling
+                    let style = match msg.role {
+                        Role::User => Style::default().fg(Color::Cyan),
+                        Role::Assistant => Style::default().fg(Color::Green),
+                    };
+
+                    if i == 0 {
+                        items.push(ListItem::new(Line::from(vec![
+                            Span::styled(role_prefix, style.add_modifier(Modifier::BOLD)),
+                            Span::styled(line.clone(), style),
+                        ])));
+                    } else {
+                        items.push(ListItem::new(Line::from(Span::styled(
+                            format!("         {}", line),
+                            style,
+                        ))));
+                    }
+                }
+            }
+
+            // Add empty line between messages
+            if !is_banner {
+                items.push(ListItem::new(Line::from("")));
+            }
+            items
+        })
+        .collect();
+
+    // Purple to Blue gradient for chat area
+    let messages_list = List::new(messages).block(gradient_block(
+        " Chat (Up/Down PgUp/PgDn Home/End to scroll, Ctrl+C to quit) ",
+        chunks[0],
+        chat_start,
+        chat_end,
+    ));
+
+    f.render_widget(messages_list, chunks[0]);
+
+    // Render scrollbar
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(Some("^"))
+        .end_symbol(Some("v"))
+        .track_symbol(Some("|"))
+        .thumb_symbol("#")
+        .style(Style::default().fg(gradient_color(chat_start, chat_end, 0.5)));
+
+    f.render_stateful_widget(
+        scrollbar,
+        chunks[0].inner(&Margin {
+            vertical: 1,
+            horizontal: 0,
+        }),
+        &mut app.scroll_state,
+    );
+
+    // Render input box
+    let input_text = if app.cursor_position < app.input.len() {
+        format!(
+            "{}|{}",
+            &app.input[..app.cursor_position],
+            &app.input[app.cursor_position..]
+        )
+    } else {
+        format!("{}|", app.input)
+    };
+
+    // Green to Cyan gradient for input area
+    let input = Paragraph::new(input_text)
+        .style(Style::default().fg(Color::Yellow))
+        .block(gradient_block(
+            " Your message ",
+            chunks[1],
+            input_start,
+            input_end,
+        ))
+        .wrap(Wrap { trim: false });
+
+    f.render_widget(input, chunks[1]);
+
+    // Render menu overlay if visible
+    if app.show_menu {
+        render_menu(f, app, &miami);
+    }
+}

@@ -4,12 +4,13 @@ A beautiful terminal-based chat interface built with Rust and Ratatui, featuring
 
 ## Features
 
-- 🎨 **Gradient Borders** - Purple→Blue chat area, Green→Cyan input area
-- 📜 **Scrolling Support** - Navigate chat history with arrow keys, Page Up/Down, Home/End
-- 📊 **Visual Scrollbar** - Gradient-colored scrollbar showing current position
-- 🎛️ **Miami-Style Menu** - Popup menu with hot pink/cyan/orange gradients (Ctrl+P to open)
-- ⌨️ **Interactive Input** - Full cursor support with backspace and arrow navigation
-- 🎯 **Echo Bot** - Responds to your messages (easily replaceable with AI/API calls)
+- **Gradient Borders** - Purple->Blue chat area, Green->Cyan input area
+- **Scrolling Support** - Navigate chat history with arrow keys, Page Up/Down, Home/End
+- **Visual Scrollbar** - Gradient-colored scrollbar showing current position
+- **Miami-Style Menu** - Popup menu with hot pink/cyan/orange gradients (Ctrl+P to open)
+- **Interactive Input** - Full cursor support with backspace and arrow navigation
+- **Echo Bot** - Responds to your messages (easily replaceable with AI/API calls)
+- **TOML Configuration** - Customize colors and behavior via config file
 
 ## Installation
 
@@ -41,67 +42,82 @@ cargo run --release
 - **Type** - Enter text
 - **Enter** - Send message
 - **Backspace** - Delete character
-- **←/→** - Move cursor
+- **Left/Right** - Move cursor
 
 ### Scrolling
-- **↑/↓** - Scroll up/down one message
+- **Up/Down** - Scroll up/down one message
 - **Page Up/Down** - Scroll 10 messages
 - **Home** - Jump to top
 - **End** - Jump to bottom
 
 ### Menu
 - **Ctrl+P** - Open/close menu
-- **↑/↓** - Navigate menu items (when open)
+- **Up/Down** - Navigate menu items (when open)
 - **Enter** - Select menu item
 - **Esc** - Close menu
 
 ### Exit
 - **Ctrl+C** or **Esc** - Quit
 
-## Customization
+## Configuration
 
-### Gradient Colors
+Chat CLI supports configuration via TOML file at `~/.config/chat-cli/config.toml`.
 
-Edit `src/main.rs` and change the RGB values in the `gradient_block()` calls:
+Copy the example config to get started:
 
-```rust
-// Chat area gradient (currently Purple → Blue)
-(147, 51, 234),  // Start color
-(59, 130, 246),  // End color
-
-// Input area gradient (currently Green → Cyan)
-(16, 185, 129),  // Start color
-(6, 182, 212),   // End color
+```bash
+mkdir -p ~/.config/chat-cli
+cp docs/config.example.toml ~/.config/chat-cli/config.toml
 ```
 
-See `gradient_presets.md` for more color combinations!
+### Configurable Options
 
-### Message Handling
+**Colors:**
+- Chat area gradient (start and end colors)
+- Input area gradient (start and end colors)
+- Miami banner colors (pink, purple, cyan, orange)
 
-Replace the echo logic in `submit_message()` to integrate with:
-- AI APIs (OpenAI, Anthropic, etc.)
-- Chat servers
-- Custom agents
-- Multi-agent orchestration
+**Behavior:**
+- `scroll_page_size` - Messages scrolled with Page Up/Down (default: 10)
+- `animation_chars_per_frame` - Banner animation speed (default: 3)
+- `animation_frame_ms` - Animation frame duration in ms (default: 16)
+- `idle_poll_ms` - Event polling interval when idle (default: 100)
+
+See [docs/config.example.toml](docs/config.example.toml) for the full example.
 
 ## Project Structure
 
 ```
 chat-cli/
 ├── src/
-│   ├── main.rs                        # Main application
-│   └── animated_gradient_example.rs   # Animation example
-├── Cargo.toml                         # Dependencies
-├── gradient_presets.md                # Color presets
-├── SCROLLING.md                       # Scrolling documentation
-├── MENU.md                            # Menu system documentation
-└── README.md                          # This file
+│   ├── main.rs          # Entry point, terminal setup
+│   ├── app.rs           # Application state and logic
+│   ├── config.rs        # Configuration loading (TOML)
+│   ├── input.rs         # Event handling and key bindings
+│   ├── message.rs       # Message and Role types
+│   └── ui/
+│       ├── mod.rs       # UI module exports
+│       ├── render.rs    # Main UI rendering
+│       ├── menu.rs      # Menu overlay rendering
+│       ├── gradient.rs  # Gradient color utilities
+│       └── text.rs      # Text wrapping and styling
+├── docs/
+│   ├── config.example.toml  # Example configuration
+│   ├── gradient_presets.md  # Color preset examples
+│   ├── SCROLLING.md         # Scrolling documentation
+│   ├── MENU.md              # Menu system documentation
+│   └── NOTES.md             # Development notes
+├── Cargo.toml
+└── README.md
 ```
 
 ## Dependencies
 
 - [ratatui](https://github.com/ratatui-org/ratatui) - Terminal UI framework
 - [crossterm](https://github.com/crossterm-rs/crossterm) - Terminal manipulation
+- [serde](https://serde.rs/) + [toml](https://github.com/toml-rs/toml) - Configuration parsing
+- [anyhow](https://github.com/dtolnay/anyhow) - Error handling
+- [dirs](https://github.com/dirs-dev/dirs-rs) - Platform-specific directories
 
 ## License
 
@@ -110,17 +126,17 @@ MIT
 ## Screenshots
 
 ```
-┌ Chat (↑↓ PgUp/PgDn Home/End to scroll, Ctrl+C to quit) ─┐
-│Assistant: Hello! I'm an echo bot. Type something and   │█
-│          I'll repeat it back to you.                    ││
-│                                                          ││
-│You: Hello there!                                        ││
-│                                                          ││
-│Assistant: You said: Hello there!                        │↓
-└──────────────────────────────────────────────────────────┘
-┌ Your message ─────────────────────────────────────────────┐
-│What should I type?█                                       │
-└───────────────────────────────────────────────────────────┘
+┌ Chat (Up/Down PgUp/PgDn Home/End to scroll, Ctrl+C to quit) ─┐
+│Assistant: Hello! I'm an echo bot. Type something and        │#
+│          I'll repeat it back to you.                         ││
+│                                                               ││
+│You: Hello there!                                             ││
+│                                                               ││
+│Assistant: You said: Hello there!                             │v
+└───────────────────────────────────────────────────────────────┘
+┌ Your message ──────────────────────────────────────────────────┐
+│What should I type?|                                            │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ## Future Ideas
