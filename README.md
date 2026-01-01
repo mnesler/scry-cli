@@ -7,6 +7,7 @@ A beautiful terminal-based chat interface built with Rust and Ratatui, featuring
 - 🎨 **Gradient Borders** - Purple→Blue chat area, Green→Cyan input area
 - 📜 **Scrolling Support** - Navigate chat history with arrow keys, Page Up/Down, Home/End
 - 📊 **Visual Scrollbar** - Gradient-colored scrollbar showing current position
+- 🎛️ **Miami-Style Menu** - Popup menu with hot pink/cyan/orange gradients (Ctrl+P to open)
 - ⌨️ **Interactive Input** - Full cursor support with backspace and arrow navigation
 - 🎯 **Echo Bot** - Responds to your messages (easily replaceable with AI/API calls)
 
@@ -48,6 +49,12 @@ cargo run --release
 - **Home** - Jump to top
 - **End** - Jump to bottom
 
+### Menu
+- **Ctrl+P** - Open/close menu
+- **↑/↓** - Navigate menu items (when open)
+- **Enter** - Select menu item
+- **Esc** - Close menu
+
 ### Exit
 - **Ctrl+C** or **Esc** - Quit
 
@@ -87,6 +94,7 @@ chat-cli/
 ├── Cargo.toml                         # Dependencies
 ├── gradient_presets.md                # Color presets
 ├── SCROLLING.md                       # Scrolling documentation
+├── MENU.md                            # Menu system documentation
 └── README.md                          # This file
 ```
 

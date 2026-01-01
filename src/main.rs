@@ -25,6 +25,8 @@ struct App {
     cursor_position: usize,
     scroll_offset: usize,
     scroll_state: ScrollbarState,
+    show_menu: bool,
+    menu_selected: usize,
 }
 
 impl App {
@@ -40,6 +42,8 @@ impl App {
             cursor_position: 0,
             scroll_offset: 0,
             scroll_state: ScrollbarState::default(),
+            show_menu: false,
+            menu_selected: 0,
         }
     }
 
@@ -117,6 +121,29 @@ impl App {
         self.scroll_state = self.scroll_state.content_length(total_items);
         self.scroll_state = self.scroll_state.position(self.scroll_offset);
     }
+
+    fn toggle_menu(&mut self) {
+        self.show_menu = !self.show_menu;
+        if self.show_menu {
+            self.menu_selected = 0;
+        }
+    }
+
+    fn menu_up(&mut self) {
+        if self.menu_selected > 0 {
+            self.menu_selected -= 1;
+        }
+    }
+
+    fn menu_down(&mut self, menu_items_count: usize) {
+        if self.menu_selected < menu_items_count - 1 {
+            self.menu_selected += 1;
+        }
+    }
+
+    fn menu_items() -> Vec<&'static str> {
+        vec!["Link Model", "Open Dashboard", "Config Orcs", "Exit"]
+    }
 }
 
 fn main() -> Result<(), io::Error> {
@@ -154,6 +181,7 @@ fn run_app<B: ratatui::backend::Backend>(
 
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
+                // Global shortcuts (work in both menu and normal mode)
                 match key.code {
                     KeyCode::Char('c') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
                         return Ok(());
@@ -161,47 +189,87 @@ fn run_app<B: ratatui::backend::Backend>(
                     KeyCode::Char('d') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
                         return Ok(());
                     }
-                    KeyCode::Enter => {
-                        app.submit_message();
+                    KeyCode::Char('p') if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                        app.toggle_menu();
                     }
-                    KeyCode::Char(c) => {
-                        app.handle_char(c);
+                    _ => {
+                        // Handle menu-specific or normal-mode keys
+                        if app.show_menu {
+                            // Menu mode key handlers
+                            match key.code {
+                                KeyCode::Up => {
+                                    app.menu_up();
+                                }
+                                KeyCode::Down => {
+                                    let menu_count = App::menu_items().len();
+                                    app.menu_down(menu_count);
+                                }
+                                KeyCode::Enter => {
+                                    // Handle menu selection
+                                    let menu_items = App::menu_items();
+                                    if let Some(selected) = menu_items.get(app.menu_selected) {
+                                        match *selected {
+                                            "Exit" => {
+                                                return Ok(());
+                                            }
+                                            _ => {
+                                                // Other menu items don't do anything yet
+                                                app.show_menu = false;
+                                            }
+                                        }
+                                    }
+                                }
+                                KeyCode::Esc => {
+                                    app.show_menu = false;
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            // Normal mode key handlers
+                            match key.code {
+                                KeyCode::Enter => {
+                                    app.submit_message();
+                                }
+                                KeyCode::Char(c) => {
+                                    app.handle_char(c);
+                                }
+                                KeyCode::Backspace => {
+                                    app.handle_backspace();
+                                }
+                                KeyCode::Left => {
+                                    app.move_cursor_left();
+                                }
+                                KeyCode::Right => {
+                                    app.move_cursor_right();
+                                }
+                                KeyCode::Up => {
+                                    app.scroll_up();
+                                }
+                                KeyCode::Down => {
+                                    let max_scroll = app.messages.len().saturating_sub(1);
+                                    app.scroll_down(max_scroll);
+                                }
+                                KeyCode::PageUp => {
+                                    app.scroll_page_up();
+                                }
+                                KeyCode::PageDown => {
+                                    let max_scroll = app.messages.len().saturating_sub(1);
+                                    app.scroll_page_down(max_scroll);
+                                }
+                                KeyCode::Home => {
+                                    app.scroll_to_top();
+                                }
+                                KeyCode::End => {
+                                    let max_scroll = app.messages.len().saturating_sub(1);
+                                    app.scroll_to_bottom(max_scroll);
+                                }
+                                KeyCode::Esc => {
+                                    return Ok(());
+                                }
+                                _ => {}
+                            }
+                        }
                     }
-                    KeyCode::Backspace => {
-                        app.handle_backspace();
-                    }
-                    KeyCode::Left => {
-                        app.move_cursor_left();
-                    }
-                    KeyCode::Right => {
-                        app.move_cursor_right();
-                    }
-                    KeyCode::Up => {
-                        app.scroll_up();
-                    }
-                    KeyCode::Down => {
-                        // Calculate max scroll based on message count
-                        let max_scroll = app.messages.len().saturating_sub(1);
-                        app.scroll_down(max_scroll);
-                    }
-                    KeyCode::PageUp => {
-                        app.scroll_page_up();
-                    }
-                    KeyCode::PageDown => {
-                        let max_scroll = app.messages.len().saturating_sub(1);
-                        app.scroll_page_down(max_scroll);
-                    }
-                    KeyCode::Home => {
-                        app.scroll_to_top();
-                    }
-                    KeyCode::End => {
-                        let max_scroll = app.messages.len().saturating_sub(1);
-                        app.scroll_to_bottom(max_scroll);
-                    }
-                    KeyCode::Esc => {
-                        return Ok(());
-                    }
-                    _ => {}
                 }
             }
         }
@@ -347,6 +415,127 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
         .wrap(Wrap { trim: false });
 
     f.render_widget(input, chunks[1]);
+
+    // Render menu overlay if visible
+    if app.show_menu {
+        render_menu(f, app);
+    }
+}
+
+fn render_menu(f: &mut ratatui::Frame, app: &App) {
+    use ratatui::layout::{Alignment};
+
+    let menu_items = App::menu_items();
+
+    // Calculate menu size
+    let menu_width = 40;
+    let menu_height = (menu_items.len() + 4) as u16; // +4 for borders and padding
+
+    // Center the menu
+    let area = f.size();
+    let menu_x = (area.width.saturating_sub(menu_width)) / 2;
+    let menu_y = (area.height.saturating_sub(menu_height)) / 2;
+
+    let menu_area = Rect {
+        x: menu_x,
+        y: menu_y,
+        width: menu_width,
+        height: menu_height,
+    };
+
+    // Miami gradient colors: Pink -> Purple -> Cyan -> Orange
+    let miami_pink = (255, 0, 128);      // Hot pink
+    let miami_purple = (138, 43, 226);   // Blue violet
+    let miami_cyan = (0, 255, 255);      // Cyan
+    let miami_orange = (255, 140, 0);    // Dark orange
+
+    // Create menu items with selection highlight
+    let mut menu_lines = vec![
+        Line::from(""),  // Empty line for spacing
+    ];
+
+    for (i, item) in menu_items.iter().enumerate() {
+        let is_selected = i == app.menu_selected;
+
+        if is_selected {
+            // Selected item: Miami gradient with bold
+            let gradient_pos = i as f32 / menu_items.len() as f32;
+            let selected_color = if gradient_pos < 0.33 {
+                gradient_color(miami_pink, miami_purple, gradient_pos * 3.0)
+            } else if gradient_pos < 0.66 {
+                gradient_color(miami_purple, miami_cyan, (gradient_pos - 0.33) * 3.0)
+            } else {
+                gradient_color(miami_cyan, miami_orange, (gradient_pos - 0.66) * 3.0)
+            };
+
+            menu_lines.push(Line::from(vec![
+                Span::styled("  ▶ ", Style::default().fg(selected_color).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{:<30}", item),
+                    Style::default()
+                        .fg(selected_color)
+                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                ),
+            ]));
+        } else {
+            // Unselected items: subtle gradient
+            let gradient_pos = i as f32 / menu_items.len() as f32;
+            let item_color = if gradient_pos < 0.5 {
+                gradient_color(miami_purple, miami_cyan, gradient_pos * 2.0)
+            } else {
+                gradient_color(miami_cyan, miami_purple, (gradient_pos - 0.5) * 2.0)
+            };
+
+            menu_lines.push(Line::from(vec![
+                Span::styled("    ", Style::default()),
+                Span::styled(
+                    format!("{:<30}", item),
+                    Style::default().fg(item_color),
+                ),
+            ]));
+        }
+    }
+
+    menu_lines.push(Line::from(""));  // Empty line for spacing
+
+    // Create the menu paragraph
+    let menu_text = Paragraph::new(menu_lines)
+        .alignment(Alignment::Left)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(gradient_color(miami_pink, miami_cyan, 0.5)))
+                .title(Span::styled(
+                    " 🎛️  MENU (Ctrl+P) ",
+                    Style::default()
+                        .fg(gradient_color(miami_pink, miami_orange, 0.7))
+                        .add_modifier(Modifier::BOLD),
+                ))
+                .style(Style::default().bg(Color::Rgb(20, 20, 30))), // Dark background
+        );
+
+    f.render_widget(menu_text, menu_area);
+
+    // Add hint at the bottom
+    let hint_y = menu_area.y + menu_area.height;
+    let hint_area = Rect {
+        x: menu_x,
+        y: hint_y,
+        width: menu_width,
+        height: 1,
+    };
+
+    let hint = Paragraph::new(Line::from(vec![
+        Span::styled("↑↓", Style::default().fg(Color::Rgb(miami_cyan.0, miami_cyan.1, miami_cyan.2)).add_modifier(Modifier::BOLD)),
+        Span::styled(" Navigate  ", Style::default().fg(Color::White)),
+        Span::styled("Enter", Style::default().fg(Color::Rgb(miami_pink.0, miami_pink.1, miami_pink.2)).add_modifier(Modifier::BOLD)),
+        Span::styled(" Select  ", Style::default().fg(Color::White)),
+        Span::styled("Esc", Style::default().fg(Color::Rgb(miami_orange.0, miami_orange.1, miami_orange.2)).add_modifier(Modifier::BOLD)),
+        Span::styled(" Close", Style::default().fg(Color::White)),
+    ]))
+    .alignment(Alignment::Center);
+
+    f.render_widget(hint, hint_area);
 }
 
 fn wrap_text(text: &str, width: usize) -> Vec<String> {
