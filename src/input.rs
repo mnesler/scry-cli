@@ -8,6 +8,7 @@ use crate::app::{App, ConnectState, MenuItem};
 use crate::config::Config;
 use crate::llm::Provider;
 use crate::ui;
+use crate::ui::AuthDialogResult;
 
 /// Result of handling a key event.
 pub enum HandleResult {
@@ -20,6 +21,9 @@ pub enum HandleResult {
 /// Cursor blink interval in milliseconds.
 const CURSOR_BLINK_MS: u64 = 530;
 
+/// OAuth timer tick interval in milliseconds.
+const OAUTH_TICK_MS: u64 = 1000;
+
 /// Run the main application loop.
 pub fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
@@ -28,6 +32,7 @@ pub fn run_app<B: Backend>(
 ) -> io::Result<()> {
     let behavior = &config.behavior;
     let mut last_cursor_toggle = Instant::now();
+    let mut last_oauth_tick = Instant::now();
 
     loop {
         // Process any streaming events first
@@ -35,6 +40,18 @@ pub fn run_app<B: Backend>(
         
         // Process async validation results
         app.process_validation();
+
+        // Process device code results (OAuth step 1)
+        app.process_device_code();
+
+        // Process async OAuth results (OAuth step 2)
+        app.process_oauth();
+
+        // Tick OAuth dialog timer
+        if last_oauth_tick.elapsed() >= Duration::from_millis(OAUTH_TICK_MS) {
+            app.tick_oauth_dialog();
+            last_oauth_tick = Instant::now();
+        }
         
         // Tick toast notifications to expire old ones
         app.tick_toasts();
@@ -47,8 +64,8 @@ pub fn run_app<B: Backend>(
             last_cursor_toggle = Instant::now();
         }
 
-        // Use timeout for animation: fast polling during animation/streaming/validation, slower when idle
-        let timeout = if !app.animation.banner_complete || app.is_streaming() || app.validation_rx.is_some() {
+        // Use timeout for animation: fast polling during animation/streaming/validation/oauth, slower when idle
+        let timeout = if !app.animation.banner_complete || app.is_streaming() || app.validation_rx.is_some() || app.oauth_rx.is_some() || app.device_code_rx.is_some() {
             Duration::from_millis(behavior.animation_frame_ms)
         } else {
             // Use shorter timeout to keep cursor blinking smooth
@@ -253,10 +270,21 @@ fn handle_connect_keys(app: &mut App, code: KeyCode) -> HandleResult {
             }
             HandleResult::Continue
         }
-        ConnectState::OAuthPending { .. } | ConnectState::OAuthPolling { .. } => {
-            // OAuth states - Esc to cancel
-            if code == KeyCode::Esc {
-                app.cancel_connection();
+        ConnectState::OAuthPending { auth_dialog, .. } | ConnectState::OAuthPolling { auth_dialog, .. } => {
+            // Handle OAuth dialog keys
+            let mut dialog = auth_dialog.clone();
+            match dialog.handle_key(code) {
+                AuthDialogResult::OpenBrowser => {
+                    // Open browser to the verification URL
+                    let url = dialog.verification_url().to_string();
+                    if open::that(&url).is_err() {
+                        app.toast_error("Could not open browser");
+                    }
+                }
+                AuthDialogResult::Cancel => {
+                    app.cancel_connection();
+                }
+                AuthDialogResult::Continue => {}
             }
             HandleResult::Continue
         }

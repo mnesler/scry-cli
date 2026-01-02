@@ -1,6 +1,7 @@
 use ratatui::widgets::ScrollbarState;
 use tokio::sync::mpsc;
 
+use crate::auth::{DeviceCode, OAuthToken};
 use crate::config::Config;
 use crate::llm::{ChatMessage, LlmClient, LlmConfig, Provider, StreamEvent};
 use crate::message::{Message, Role};
@@ -421,6 +422,10 @@ pub struct App {
     pub connect: ConnectState,
     /// Receiver for async API key validation results
     pub validation_rx: Option<tokio::sync::oneshot::Receiver<Result<(), String>>>,
+    /// Receiver for async OAuth polling results
+    pub oauth_rx: Option<tokio::sync::oneshot::Receiver<Result<OAuthToken, String>>>,
+    /// Receiver for async device code request
+    pub device_code_rx: Option<tokio::sync::oneshot::Receiver<Result<DeviceCode, String>>>,
 }
 
 impl App {
@@ -443,6 +448,8 @@ impl App {
             toasts: ToastState::default(),
             connect: ConnectState::default(),
             validation_rx: None,
+            oauth_rx: None,
+            device_code_rx: None,
         }
     }
 
@@ -468,6 +475,8 @@ impl App {
             toasts: ToastState::default(),
             connect: ConnectState::default(),
             validation_rx: None,
+            oauth_rx: None,
+            device_code_rx: None,
         }
     }
 
@@ -816,11 +825,8 @@ impl App {
 
         // No existing credentials - determine how to connect
         if provider.uses_oauth() {
-            // OAuth providers (Copilot) - will be handled in a later issue
-            // For now, show a message
-            self.chat.messages.push(Message::assistant(
-                format!("{} uses OAuth authentication. This feature is coming soon.", provider.display_name())
-            ));
+            // OAuth providers (Copilot) - start device code flow
+            self.start_oauth_flow(provider);
         } else if !provider.requires_api_key() {
             // Provider doesn't need auth (e.g., Ollama) - connect directly
             self.complete_connection(provider, None);
@@ -836,6 +842,8 @@ impl App {
     /// Cancel the connection flow and return to normal state.
     pub fn cancel_connection(&mut self) {
         self.connect = ConnectState::None;
+        self.device_code_rx = None;
+        self.oauth_rx = None;
     }
 
     /// Complete the connection successfully.
@@ -975,6 +983,194 @@ impl App {
             }
         }
         false
+    }
+
+    /// Start the OAuth device code flow for a provider.
+    ///
+    /// Requests a device code and transitions to OAuthPending state.
+    /// Once the device code is received, we transition to OAuthPolling.
+    pub fn start_oauth_flow(&mut self, provider: Provider) {
+        use crate::auth::DeviceCodeFlow;
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.device_code_rx = Some(rx);
+
+        // Spawn task to request device code only (not polling yet)
+        tokio::spawn(async move {
+            let flow = DeviceCodeFlow::github_copilot();
+            match flow.request_device_code().await {
+                Ok(device_code) => {
+                    let _ = tx.send(Ok(device_code));
+                }
+                Err(e) => {
+                    let _ = tx.send(Err(e.to_string()));
+                }
+            }
+        });
+
+        // Create a placeholder device code for the dialog
+        let placeholder_device_code = DeviceCode {
+            device_code: String::new(),
+            user_code: "Loading...".to_string(),
+            verification_uri: "https://github.com/login/device".to_string(),
+            verification_uri_complete: None,
+            expires_in: 900,
+            interval: 5,
+        };
+
+        self.connect = ConnectState::OAuthPending {
+            provider,
+            auth_dialog: AuthDialog::new(provider.display_name(), placeholder_device_code),
+        };
+    }
+
+    /// Process device code request results.
+    ///
+    /// Call this in the event loop to check for device code.
+    /// Returns true if device code was received (success or failure).
+    pub fn process_device_code(&mut self) -> bool {
+        if let Some(mut rx) = self.device_code_rx.take() {
+            match rx.try_recv() {
+                Ok(Ok(device_code)) => {
+                    // Device code received - transition to polling
+                    if let ConnectState::OAuthPending { provider, .. } = &self.connect {
+                        let provider = *provider;
+                        self.start_oauth_polling(provider, device_code);
+                    }
+                    return true;
+                }
+                Ok(Err(e)) => {
+                    // Failed to get device code
+                    self.toast_error(format!("Failed to start authentication: {}", e));
+                    self.connect = ConnectState::None;
+                    return true;
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
+                    // Still pending, put the receiver back
+                    self.device_code_rx = Some(rx);
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                    // Channel closed unexpectedly
+                    self.toast_error("Device code request failed");
+                    self.connect = ConnectState::None;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Start OAuth polling after device code is received.
+    ///
+    /// Call this to transition from OAuthPending to OAuthPolling with a real device code.
+    pub fn start_oauth_polling(&mut self, provider: Provider, device_code: DeviceCode) {
+        use crate::auth::DeviceCodeFlow;
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.oauth_rx = Some(rx);
+
+        let dc = device_code.clone();
+        tokio::spawn(async move {
+            let flow = DeviceCodeFlow::github_copilot();
+            match flow.poll_for_token(&dc, || {}).await {
+                Ok(token) => {
+                    let _ = tx.send(Ok(token));
+                }
+                Err(e) => {
+                    let _ = tx.send(Err(e.to_string()));
+                }
+            }
+        });
+
+        self.connect = ConnectState::OAuthPolling {
+            provider,
+            auth_dialog: AuthDialog::new(provider.display_name(), device_code),
+        };
+    }
+
+    /// Process async OAuth polling results.
+    ///
+    /// Call this in the event loop to check for completed OAuth flows.
+    /// Returns true if OAuth completed (success or failure).
+    pub fn process_oauth(&mut self) -> bool {
+        if let Some(mut rx) = self.oauth_rx.take() {
+            match rx.try_recv() {
+                Ok(Ok(token)) => {
+                    // OAuth succeeded
+                    if let ConnectState::OAuthPolling { provider, .. }
+                    | ConnectState::OAuthPending { provider, .. } = &self.connect
+                    {
+                        let provider = *provider;
+                        self.complete_oauth(provider, token);
+                    }
+                    return true;
+                }
+                Ok(Err(e)) => {
+                    // OAuth failed
+                    self.toast_error(format!("Authentication failed: {}", e));
+                    self.connect = ConnectState::None;
+                    return true;
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
+                    // Still pending, put the receiver back
+                    self.oauth_rx = Some(rx);
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                    // Channel closed unexpectedly
+                    self.toast_error("OAuth task failed unexpectedly");
+                    self.connect = ConnectState::None;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Complete OAuth authentication.
+    ///
+    /// Saves the token and switches to the provider.
+    fn complete_oauth(&mut self, provider: Provider, token: OAuthToken) {
+        use crate::auth::{AuthStorage, Credential};
+
+        // Save the OAuth credential
+        if let Ok(mut storage) = AuthStorage::load() {
+            let expires_at = token.expires_at();
+            storage.set(
+                provider.storage_key(),
+                Credential::oauth(&token.access_token, token.refresh_token.clone(), expires_at),
+            );
+            if let Err(e) = storage.save() {
+                self.toast_warning(format!("Could not save credentials: {}", e));
+            }
+        }
+
+        // Configure and switch to the provider
+        self.llm.config.provider = provider;
+        self.llm.config.api_base = provider.default_api_base().to_string();
+        self.llm.config.model = provider.default_model().to_string();
+        self.llm.config.api_key = token.access_token;
+        self.llm.apply_config();
+        self.connect = ConnectState::None;
+
+        self.toast_success(format!("Connected to {}", provider.display_name()));
+    }
+
+    /// Tick the OAuth auth dialog timer.
+    ///
+    /// Call this each second to update the countdown.
+    pub fn tick_oauth_dialog(&mut self) {
+        match &mut self.connect {
+            ConnectState::OAuthPending { auth_dialog, .. }
+            | ConnectState::OAuthPolling { auth_dialog, .. } => {
+                auth_dialog.tick();
+                if auth_dialog.is_expired() {
+                    self.toast_error("Authentication timed out");
+                    self.connect = ConnectState::None;
+                    self.oauth_rx = None;
+                }
+            }
+            _ => {}
+        }
     }
 }
 
