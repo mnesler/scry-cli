@@ -1,12 +1,12 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Margin},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, Wrap},
     Frame,
 };
 
-use crate::app::App;
+use crate::app::{App, ConnectState};
 use crate::config::Config;
 use crate::message::Role;
 
@@ -197,4 +197,285 @@ pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
 
     // Render toast notifications (above main content, but below dialogs)
     render_toasts(f, &app.toasts);
+
+    // Render connection dialog if active (on top of everything)
+    if app.connect.is_active() {
+        render_connect_dialog(f, app);
+    }
+}
+
+/// Calculate a centered rectangle within an area.
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let width = (area.width as u32 * percent_x as u32 / 100) as u16;
+    let height = (area.height as u32 * percent_y as u32 / 100) as u16;
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    Rect::new(x, y, width, height)
+}
+
+/// Render the connection dialog based on current state.
+pub fn render_connect_dialog(f: &mut Frame, app: &App) {
+    match &app.connect {
+        ConnectState::None => {}
+        ConnectState::ExistingCredential {
+            provider,
+            masked_key,
+            selected,
+        } => {
+            render_existing_credential_dialog(f, provider.display_name(), masked_key, *selected);
+        }
+        ConnectState::SelectingMethod { provider, selected } => {
+            render_selecting_method_dialog(f, provider.display_name(), *selected);
+        }
+        ConnectState::EnteringApiKey {
+            provider,
+            input,
+            cursor,
+            error,
+        } => {
+            render_entering_api_key_dialog(
+                f,
+                provider.display_name(),
+                input,
+                *cursor,
+                error.as_deref(),
+            );
+        }
+        ConnectState::ValidatingKey { provider, .. } => {
+            render_validating_dialog(f, provider.display_name());
+        }
+        ConnectState::OAuthPending { auth_dialog, .. }
+        | ConnectState::OAuthPolling { auth_dialog, .. } => {
+            auth_dialog.render(f, f.size());
+        }
+    }
+}
+
+/// Render the "existing credential" dialog.
+fn render_existing_credential_dialog(
+    f: &mut Frame,
+    provider_name: &str,
+    masked_key: &str,
+    selected: usize,
+) {
+    let area = centered_rect(50, 40, f.size());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(format!(" Already Connected to {} ", provider_name))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .style(Style::default().bg(Color::Black));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // Layout: info line, spacer, options, spacer, hints
+    let chunks = Layout::vertical([
+        Constraint::Length(2), // Current key info
+        Constraint::Length(1), // Spacer
+        Constraint::Min(3),    // Options
+        Constraint::Length(1), // Hints
+    ])
+    .split(inner);
+
+    // Current key info
+    let info = Paragraph::new(format!("Current key: {}", masked_key))
+        .style(Style::default().fg(Color::Gray));
+    f.render_widget(info, chunks[0]);
+
+    // Options
+    let options = vec!["Use existing key", "Enter new key", "Cancel"];
+    let lines: Vec<Line> = options
+        .iter()
+        .enumerate()
+        .map(|(i, opt)| {
+            let style = if i == selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            let prefix = if i == selected { "> " } else { "  " };
+            Line::from(Span::styled(format!("{}{}", prefix, opt), style))
+        })
+        .collect();
+    let options_widget = Paragraph::new(lines);
+    f.render_widget(options_widget, chunks[2]);
+
+    // Hints
+    let hints = Line::from(vec![
+        Span::styled("[↑↓]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Navigate  "),
+        Span::styled("[Enter]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Select  "),
+        Span::styled("[Esc]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Cancel"),
+    ]);
+    let hints_widget = Paragraph::new(hints).style(Style::default().fg(Color::Gray));
+    f.render_widget(hints_widget, chunks[3]);
+}
+
+/// Render the "selecting method" dialog.
+fn render_selecting_method_dialog(f: &mut Frame, provider_name: &str, selected: usize) {
+    let area = centered_rect(50, 40, f.size());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(format!(" Connect to {} ", provider_name))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .style(Style::default().bg(Color::Black));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // Layout: options, hints
+    let chunks = Layout::vertical([
+        Constraint::Min(3),    // Options
+        Constraint::Length(1), // Hints
+    ])
+    .split(inner);
+
+    // Options
+    let options = vec![
+        "Enter API Key manually",
+        "Create API Key (opens browser)",
+        "Cancel",
+    ];
+    let lines: Vec<Line> = options
+        .iter()
+        .enumerate()
+        .map(|(i, opt)| {
+            let style = if i == selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            let prefix = if i == selected { "> " } else { "  " };
+            Line::from(Span::styled(format!("{}{}", prefix, opt), style))
+        })
+        .collect();
+    let options_widget = Paragraph::new(lines);
+    f.render_widget(options_widget, chunks[0]);
+
+    // Hints
+    let hints = Line::from(vec![
+        Span::styled("[↑↓]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Navigate  "),
+        Span::styled("[Enter]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Select  "),
+        Span::styled("[Esc]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Cancel"),
+    ]);
+    let hints_widget = Paragraph::new(hints).style(Style::default().fg(Color::Gray));
+    f.render_widget(hints_widget, chunks[1]);
+}
+
+/// Render the "entering API key" dialog.
+fn render_entering_api_key_dialog(
+    f: &mut Frame,
+    provider_name: &str,
+    input: &str,
+    cursor: usize,
+    error: Option<&str>,
+) {
+    let height_percent = if error.is_some() { 45 } else { 35 };
+    let area = centered_rect(60, height_percent, f.size());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(format!(" Enter {} API Key ", provider_name))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .style(Style::default().bg(Color::Black));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // Layout with optional error
+    let constraints = if error.is_some() {
+        vec![
+            Constraint::Length(1), // Input label
+            Constraint::Length(1), // Input field
+            Constraint::Length(1), // Spacer
+            Constraint::Length(1), // Hints
+            Constraint::Length(1), // Spacer
+            Constraint::Min(1),    // Error
+        ]
+    } else {
+        vec![
+            Constraint::Length(1), // Input label
+            Constraint::Length(1), // Input field
+            Constraint::Length(1), // Spacer
+            Constraint::Length(1), // Hints
+            Constraint::Min(0),    // Filler
+        ]
+    };
+    let chunks = Layout::vertical(constraints).split(inner);
+
+    // Input label
+    let label = Paragraph::new("API Key:").style(Style::default().fg(Color::Gray));
+    f.render_widget(label, chunks[0]);
+
+    // Input field with cursor
+    let display_input = if cursor < input.len() {
+        Line::from(vec![
+            Span::styled("> ", Style::default().fg(Color::Cyan)),
+            Span::raw(&input[..cursor]),
+            Span::styled("▎", Style::default().fg(Color::Cyan).add_modifier(Modifier::SLOW_BLINK)),
+            Span::raw(&input[cursor..]),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("> ", Style::default().fg(Color::Cyan)),
+            Span::raw(input),
+            Span::styled("▎", Style::default().fg(Color::Cyan).add_modifier(Modifier::SLOW_BLINK)),
+        ])
+    };
+    let input_widget = Paragraph::new(display_input).style(Style::default().fg(Color::White));
+    f.render_widget(input_widget, chunks[1]);
+
+    // Hints
+    let hints = Line::from(vec![
+        Span::styled("[Enter]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Validate & Save  "),
+        Span::styled("[Esc]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Cancel"),
+    ]);
+    let hints_widget = Paragraph::new(hints).style(Style::default().fg(Color::Gray));
+    f.render_widget(hints_widget, chunks[3]);
+
+    // Error message if present
+    if let Some(err) = error {
+        let error_widget = Paragraph::new(err)
+            .style(Style::default().fg(Color::Red))
+            .wrap(Wrap { trim: true });
+        f.render_widget(error_widget, chunks[5]);
+    }
+}
+
+/// Render the "validating key" dialog.
+fn render_validating_dialog(f: &mut Frame, provider_name: &str) {
+    let area = centered_rect(50, 25, f.size());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(" Validating API Key... ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .style(Style::default().bg(Color::Black));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let text = Paragraph::new(format!("Testing connection to {}", provider_name))
+        .style(Style::default().fg(Color::Gray))
+        .wrap(Wrap { trim: true });
+    f.render_widget(text, inner);
 }
