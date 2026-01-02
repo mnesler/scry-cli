@@ -66,12 +66,65 @@ impl Default for BehaviorConfig {
     }
 }
 
+/// TTE (Terminal Text Effects) welcome screen configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct WelcomeConfig {
+    /// Whether to show the welcome screen at all
+    pub enabled: bool,
+    /// Whether to use TTE effects (falls back to simple if TTE not installed)
+    pub use_tte: bool,
+    /// TTE effect to use: "beams", "decrypt", "rain", "slide", "waves", etc.
+    pub effect: String,
+    /// Row beam speed range (min-max), lower = slower
+    pub beam_row_speed_min: u32,
+    pub beam_row_speed_max: u32,
+    /// Column beam speed range (min-max), lower = slower
+    pub beam_column_speed_min: u32,
+    pub beam_column_speed_max: u32,
+    /// Delay between beam groups
+    pub beam_delay: u32,
+    /// Final wipe animation speed (lower = slower)
+    pub final_wipe_speed: u32,
+    /// Gradient colors for the beam effect (hex without #)
+    pub gradient_stops: Vec<String>,
+    /// Final gradient colors (hex without #)
+    pub final_gradient_stops: Vec<String>,
+}
+
+impl Default for WelcomeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            use_tte: true,
+            effect: "beams".to_string(),
+            beam_row_speed_min: 10,
+            beam_row_speed_max: 25,
+            beam_column_speed_min: 6,
+            beam_column_speed_max: 10,
+            beam_delay: 10,
+            final_wipe_speed: 1,
+            gradient_stops: vec![
+                "ff0080".to_string(), // Hot pink
+                "00ffff".to_string(), // Cyan
+                "8a2be2".to_string(), // Purple
+            ],
+            final_gradient_stops: vec![
+                "8a2be2".to_string(), // Purple
+                "00ffff".to_string(), // Cyan
+                "ff0080".to_string(), // Hot pink
+            ],
+        }
+    }
+}
+
 /// Main application configuration.
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
     pub colors: ColorConfig,
     pub behavior: BehaviorConfig,
+    pub welcome: WelcomeConfig,
 }
 
 impl Config {

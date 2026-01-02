@@ -1,9 +1,10 @@
 # Chat CLI
 
-A beautiful terminal-based chat interface built with Rust and Ratatui, featuring gradient borders and smooth scrolling.
+A beautiful terminal-based chat interface built with Rust and Ratatui, featuring gradient borders, smooth scrolling, and optional Terminal Text Effects (TTE) integration.
 
 ## Features
 
+- **Animated Welcome Screen** - Uses [Terminal Text Effects](https://github.com/ChrisBuilds/terminaltexteffects) for a stunning beams effect (optional)
 - **Gradient Borders** - Purple->Blue chat area, Green->Cyan input area
 - **Scrolling Support** - Navigate chat history with arrow keys, Page Up/Down, Home/End
 - **Visual Scrollbar** - Gradient-colored scrollbar showing current position
@@ -17,6 +18,17 @@ A beautiful terminal-based chat interface built with Rust and Ratatui, featuring
 ### Prerequisites
 
 - Rust 1.70+ (install from [rustup.rs](https://rustup.rs))
+- **Optional:** Python 3.8+ with `terminaltexteffects` for animated welcome screen
+
+### Install Terminal Text Effects (Optional)
+
+For the animated welcome screen with the beams effect:
+
+```bash
+pip install terminaltexteffects
+```
+
+If TTE is not installed, the app will display a simple welcome message instead.
 
 ### Build
 
@@ -95,6 +107,7 @@ chat-cli/
 │   ├── config.rs        # Configuration loading (TOML)
 │   ├── input.rs         # Event handling and key bindings
 │   ├── message.rs       # Message and Role types
+│   ├── welcome.rs       # TTE welcome screen integration
 │   └── ui/
 │       ├── mod.rs       # UI module exports
 │       ├── render.rs    # Main UI rendering
@@ -113,11 +126,15 @@ chat-cli/
 
 ## Dependencies
 
+### Rust
 - [ratatui](https://github.com/ratatui-org/ratatui) - Terminal UI framework
 - [crossterm](https://github.com/crossterm-rs/crossterm) - Terminal manipulation
 - [serde](https://serde.rs/) + [toml](https://github.com/toml-rs/toml) - Configuration parsing
 - [anyhow](https://github.com/dtolnay/anyhow) - Error handling
 - [dirs](https://github.com/dirs-dev/dirs-rs) - Platform-specific directories
+
+### Optional (Python)
+- [terminaltexteffects](https://github.com/ChrisBuilds/terminaltexteffects) - Animated text effects
 
 ## License
 
@@ -125,10 +142,14 @@ MIT
 
 ## Screenshots
 
+### Welcome Screen (with TTE)
+The beams effect creates an animated reveal of the welcome text with Miami-inspired colors.
+
+### Chat Interface
 ```
 ┌ Chat (Up/Down PgUp/PgDn Home/End to scroll, Ctrl+C to quit) ─┐
-│Assistant: Hello! I'm an echo bot. Type something and        │#
-│          I'll repeat it back to you.                         ││
+│Assistant: Welcome! Type a message and press Enter to chat.  │#
+│           Press Ctrl+P for menu.                              ││
 │                                                               ││
 │You: Hello there!                                             ││
 │                                                               ││
@@ -141,13 +162,13 @@ MIT
 
 ## Future Ideas
 
-- [ ] Animated gradients
 - [ ] Syntax highlighting for code blocks
 - [ ] Message history persistence
 - [ ] AI integration (OpenAI, Anthropic, etc.)
 - [ ] Multi-agent workflow support
 - [ ] Themes and color schemes
 - [ ] Markdown rendering
+- [ ] Additional TTE effects (configurable)
 
 ## Contributing
 

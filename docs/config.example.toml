@@ -28,3 +28,63 @@ animation_frame_ms = 16
 
 # Idle polling interval in milliseconds
 idle_poll_ms = 100
+
+[welcome]
+# Whether to show the welcome screen at startup
+enabled = true
+
+# Use TTE (Terminal Text Effects) for animated welcome
+# Set to false for a simple static welcome screen
+# TTE must be installed: pip install terminaltexteffects
+use_tte = true
+
+# TTE effect to use. Available effects:
+# "beams", "decrypt", "rain", "slide", "waves", and more
+# See: https://chrisbuilds.github.io/terminaltexteffects/
+effect = "beams"
+
+# === Beams Effect Settings ===
+# These settings only apply when effect = "beams"
+
+# Row beam speed range (min-max). Lower values = slower animation
+beam_row_speed_min = 10
+beam_row_speed_max = 25
+
+# Column beam speed range (min-max). Lower values = slower animation
+beam_column_speed_min = 6
+beam_column_speed_max = 10
+
+# Delay between beam groups (higher = more staggered)
+beam_delay = 10
+
+# Final wipe animation speed (lower = slower)
+final_wipe_speed = 1
+
+# === Gradient Colors ===
+# Colors are hex values WITHOUT the # prefix
+
+# Beam gradient colors (Miami theme)
+gradient_stops = ["ff0080", "00ffff", "8a2be2"]
+
+# Final reveal gradient colors
+final_gradient_stops = ["8a2be2", "00ffff", "ff0080"]
+
+# === Alternative Presets ===
+# Uncomment one of these blocks for different themes:
+
+# Cyberpunk Theme:
+# gradient_stops = ["ff00ff", "00ff00", "ffff00"]
+# final_gradient_stops = ["00ff00", "ff00ff", "00ffff"]
+
+# Ocean Theme:
+# gradient_stops = ["0077be", "00ced1", "20b2aa"]
+# final_gradient_stops = ["20b2aa", "00ced1", "0077be"]
+
+# Sunset Theme:
+# gradient_stops = ["ff4500", "ff6347", "ffd700"]
+# final_gradient_stops = ["ffd700", "ff6347", "ff4500"]
+
+# Monochrome (fast, subtle):
+# effect = "decrypt"
+# gradient_stops = ["ffffff", "888888", "ffffff"]
+# final_gradient_stops = ["00ff00", "00aa00", "00ff00"]

@@ -7,6 +7,7 @@ mod config;
 mod input;
 mod message;
 mod ui;
+mod welcome;
 
 use std::io;
 
@@ -24,15 +25,20 @@ fn main() -> Result<()> {
     // Load configuration
     let config = Config::load();
 
-    // Setup terminal
+    // Show welcome screen with TTE effects (if available)
+    if let Err(e) = welcome::show_welcome(&config.welcome) {
+        eprintln!("Warning: Welcome screen failed: {}", e);
+    }
+
+    // Setup terminal for TUI
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Create app
-    let mut app = App::new();
+    // Create app (without the old banner since we showed TTE welcome)
+    let mut app = App::new_without_banner();
 
     // Run app
     let res = input::run_app(&mut terminal, &mut app, &config);
