@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 use crate::config::Config;
 use crate::llm::{ChatMessage, LlmClient, LlmConfig, Provider, StreamEvent};
 use crate::message::{Message, Role};
-use crate::ui::{ToastLevel, ToastState};
+use crate::ui::{AuthDialog, ToastLevel, ToastState};
 
 /// Connection status for the LLM.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,6 +17,91 @@ pub enum ConnectionStatus {
     Streaming,
     /// An error occurred
     Error(String),
+}
+
+/// State of the interactive connection flow.
+///
+/// This enum tracks the user's progress through the connection dialog,
+/// which allows them to enter API keys or authenticate via OAuth.
+#[derive(Debug, Clone)]
+pub enum ConnectState {
+    /// No connection dialog is active.
+    None,
+    /// User has existing credentials; offer to use them or enter new ones.
+    ExistingCredential {
+        provider: Provider,
+        masked_key: String,
+        selected: usize,
+    },
+    /// User is selecting how to authenticate (enter key, open browser, cancel).
+    SelectingMethod {
+        provider: Provider,
+        selected: usize,
+    },
+    /// User is typing an API key.
+    EnteringApiKey {
+        provider: Provider,
+        input: String,
+        cursor: usize,
+        error: Option<String>,
+    },
+    /// Validating the API key with the provider.
+    ValidatingKey {
+        provider: Provider,
+        key: String,
+    },
+    /// OAuth device code flow pending (waiting for device code).
+    OAuthPending {
+        provider: Provider,
+        auth_dialog: AuthDialog,
+    },
+    /// OAuth device code flow polling (device code received, polling for token).
+    OAuthPolling {
+        provider: Provider,
+        auth_dialog: AuthDialog,
+    },
+}
+
+impl Default for ConnectState {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+impl ConnectState {
+    /// Check if a connection dialog is active.
+    pub fn is_active(&self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    /// Get the provider being connected to, if any.
+    pub fn provider(&self) -> Option<Provider> {
+        match self {
+            Self::None => None,
+            Self::ExistingCredential { provider, .. }
+            | Self::SelectingMethod { provider, .. }
+            | Self::EnteringApiKey { provider, .. }
+            | Self::ValidatingKey { provider, .. }
+            | Self::OAuthPending { provider, .. }
+            | Self::OAuthPolling { provider, .. } => Some(*provider),
+        }
+    }
+}
+
+/// Mask an API key for display, showing only first and last 4 characters.
+///
+/// Examples:
+/// - "sk-ant-api03-abc123xyz789" -> "sk-a...9789"
+/// - "short" -> "*****"
+/// - "" -> ""
+pub fn mask_api_key(key: &str) -> String {
+    if key.is_empty() {
+        return String::new();
+    }
+    if key.len() <= 8 {
+        return "*".repeat(key.len());
+    }
+    format!("{}...{}", &key[..4], &key[key.len() - 4..])
 }
 
 /// Input mode for the application.
@@ -332,6 +417,8 @@ pub struct App {
     pub llm: LlmState,
     /// Toast notification state
     pub toasts: ToastState,
+    /// Connection dialog state
+    pub connect: ConnectState,
 }
 
 impl App {
@@ -352,6 +439,7 @@ impl App {
             animation: AnimationState::default(),
             llm: LlmState::new(llm_config),
             toasts: ToastState::default(),
+            connect: ConnectState::default(),
         }
     }
 
@@ -375,6 +463,7 @@ impl App {
             animation: AnimationState::no_banner(),
             llm: LlmState::new(llm_config),
             toasts: ToastState::default(),
+            connect: ConnectState::default(),
         }
     }
 
@@ -694,5 +783,81 @@ impl App {
 impl Default for App {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mask_api_key_normal() {
+        assert_eq!(mask_api_key("sk-ant-api03-abcdefghijklmnop"), "sk-a...mnop");
+    }
+
+    #[test]
+    fn test_mask_api_key_short() {
+        assert_eq!(mask_api_key("short"), "*****");
+        assert_eq!(mask_api_key("12345678"), "********");
+    }
+
+    #[test]
+    fn test_mask_api_key_empty() {
+        assert_eq!(mask_api_key(""), "");
+    }
+
+    #[test]
+    fn test_mask_api_key_exactly_nine_chars() {
+        // 9 chars should show first 4 and last 4, which overlaps but works
+        assert_eq!(mask_api_key("123456789"), "1234...6789");
+    }
+
+    #[test]
+    fn test_connect_state_default() {
+        let state = ConnectState::default();
+        assert!(!state.is_active());
+        assert!(state.provider().is_none());
+    }
+
+    #[test]
+    fn test_connect_state_is_active() {
+        let state = ConnectState::SelectingMethod {
+            provider: Provider::Anthropic,
+            selected: 0,
+        };
+        assert!(state.is_active());
+        assert_eq!(state.provider(), Some(Provider::Anthropic));
+    }
+
+    #[test]
+    fn test_connect_state_entering_api_key() {
+        let state = ConnectState::EnteringApiKey {
+            provider: Provider::OpenRouter,
+            input: "sk-or-test".to_string(),
+            cursor: 10,
+            error: None,
+        };
+        assert!(state.is_active());
+        assert_eq!(state.provider(), Some(Provider::OpenRouter));
+    }
+
+    #[test]
+    fn test_connect_state_validating() {
+        let state = ConnectState::ValidatingKey {
+            provider: Provider::Anthropic,
+            key: "sk-ant-test".to_string(),
+        };
+        assert!(state.is_active());
+    }
+
+    #[test]
+    fn test_connect_state_clone() {
+        let state = ConnectState::ExistingCredential {
+            provider: Provider::Anthropic,
+            masked_key: "sk-a...xyz".to_string(),
+            selected: 1,
+        };
+        let cloned = state.clone();
+        assert!(matches!(cloned, ConnectState::ExistingCredential { .. }));
     }
 }
