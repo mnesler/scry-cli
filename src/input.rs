@@ -164,9 +164,9 @@ fn handle_submenu_keys(app: &mut App, code: KeyCode) -> HandleResult {
             app.menu_down(0, submenu_count);
         }
         KeyCode::Enter => {
-            // Select the provider
+            // Start connection flow for selected provider
             if let Some(provider) = app.selected_provider() {
-                app.switch_provider(provider);
+                app.start_connection(provider);
             }
         }
         KeyCode::Esc | KeyCode::Left => {
