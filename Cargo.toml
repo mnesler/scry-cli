@@ -1,5 +1,5 @@
 [package]
-name = "chat-cli"
+name = "scry-cli"
 version = "0.1.0"
 edition = "2021"
 description = "A beautiful terminal-based chat interface with gradient borders and smooth scrolling"
@@ -12,5 +12,9 @@ ratatui = "0.26"
 crossterm = "0.27"
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 toml = "0.8"
 dirs = "5.0"
+tokio = { version = "1.0", features = ["rt-multi-thread", "sync", "macros", "time"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures = "0.3"

@@ -2,15 +2,15 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Margin},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, Wrap},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, Wrap},
     Frame,
 };
 
-use crate::app::App;
+use crate::app::{App, ConnectionStatus};
 use crate::config::Config;
 use crate::message::Role;
 
-use super::gradient::{gradient_block, gradient_color};
+use super::gradient::{gradient_block_with_status, gradient_color};
 use super::menu::render_menu;
 use super::text::{apply_miami_gradient_to_line, wrap_text};
 
@@ -22,6 +22,25 @@ pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
     let (chat_start, chat_end) = colors.chat_gradient();
     let (input_start, input_end) = colors.input_gradient();
 
+    let border_color = Color::Black;
+    let bg_color = Color::Rgb(20, 20, 25);
+
+    // Fill entire background with border color to create thick border effect
+    let background = Block::default()
+        .style(Style::default().bg(border_color));
+    f.render_widget(background, f.size());
+
+    // Inner area with margin to create thick border (2 chars on sides, 1 on top/bottom)
+    let inner_area = f.size().inner(&Margin {
+        horizontal: 2,
+        vertical: 1,
+    });
+
+    // Dark background for inner content area
+    let inner_bg = Block::default()
+        .style(Style::default().bg(bg_color));
+    f.render_widget(inner_bg, inner_area);
+
     // Create layout: chat area (top) and input area (bottom)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -29,7 +48,7 @@ pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
             Constraint::Min(3),    // Chat messages
             Constraint::Length(3), // Input box
         ])
-        .split(f.size());
+        .split(inner_area);
 
     // Update scroll state with total message count
     let total_messages = app.messages.len();
@@ -107,9 +126,19 @@ pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
         })
         .collect();
 
+    // Status indicator for connection
+    let (status_text, status_color) = match &app.connection_status {
+        ConnectionStatus::NotConfigured => ("● No API Key", Color::Rgb(255, 100, 100)),
+        ConnectionStatus::Ready => ("● Ready", Color::Rgb(100, 255, 100)),
+        ConnectionStatus::Streaming => ("● Streaming...", Color::Rgb(100, 200, 255)),
+        ConnectionStatus::Error(_) => ("● Error", Color::Rgb(255, 100, 100)),
+    };
+
     // Purple to Blue gradient for chat area
-    let messages_list = List::new(messages).block(gradient_block(
-        " Chat (Up/Down PgUp/PgDn Home/End to scroll, Ctrl+C to quit) ",
+    let messages_list = List::new(messages).block(gradient_block_with_status(
+        " Scry ",
+        status_text,
+        status_color,
         chunks[0],
         chat_start,
         chat_end,
@@ -117,13 +146,19 @@ pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
 
     f.render_widget(messages_list, chunks[0]);
 
-    // Render scrollbar
+    // Render scrollbar with smooth Unicode characters and gradient
+    let scroll_position = if total_messages > 0 {
+        app.scroll_offset as f32 / total_messages as f32
+    } else {
+        0.0
+    };
+    
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-        .begin_symbol(Some("^"))
-        .end_symbol(Some("v"))
-        .track_symbol(Some("|"))
-        .thumb_symbol("#")
-        .style(Style::default().fg(gradient_color(chat_start, chat_end, 0.5)));
+        .begin_symbol(Some("▲"))
+        .end_symbol(Some("▼"))
+        .track_symbol(Some("░"))
+        .thumb_symbol("█")
+        .style(Style::default().fg(gradient_color(chat_start, chat_end, scroll_position)));
 
     f.render_stateful_widget(
         scrollbar,
@@ -134,26 +169,31 @@ pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
         &mut app.scroll_state,
     );
 
-    // Render input box
+    // Render input box with left border only, dark grey background, blinking cursor
+    let cursor_char = if app.cursor_visible { "▎" } else { " " };
+    
     let input_text = if app.cursor_position < app.input.len() {
-        format!(
-            "{}|{}",
-            &app.input[..app.cursor_position],
-            &app.input[app.cursor_position..]
-        )
+        Line::from(vec![
+            Span::raw(&app.input[..app.cursor_position]),
+            Span::styled(cursor_char, Style::default().fg(Color::Cyan).add_modifier(Modifier::SLOW_BLINK)),
+            Span::raw(&app.input[app.cursor_position..]),
+        ])
     } else {
-        format!("{}|", app.input)
+        Line::from(vec![
+            Span::raw(&app.input),
+            Span::styled(cursor_char, Style::default().fg(Color::Cyan).add_modifier(Modifier::SLOW_BLINK)),
+        ])
     };
 
-    // Green to Cyan gradient for input area
+    // Dark grey background, left border only with gradient color
+    let input_block = Block::default()
+        .borders(Borders::LEFT)
+        .border_style(Style::default().fg(gradient_color(input_start, input_end, 0.5)))
+        .style(Style::default().bg(Color::Rgb(30, 30, 35)));
+
     let input = Paragraph::new(input_text)
-        .style(Style::default().fg(Color::Yellow))
-        .block(gradient_block(
-            " Your message ",
-            chunks[1],
-            input_start,
-            input_end,
-        ))
+        .style(Style::default().fg(Color::White))
+        .block(input_block)
         .wrap(Wrap { trim: false });
 
     f.render_widget(input, chunks[1]);

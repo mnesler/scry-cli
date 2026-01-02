@@ -1,11 +1,39 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// RGB color represented as a 3-element array.
 pub type Rgb = [u8; 3];
 
+/// LLM configuration for API access.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct LlmConfigFile {
+    /// API base URL (OpenAI-compatible)
+    pub api_base: String,
+    /// API key (can also be set via OPENAI_API_KEY env var)
+    pub api_key: Option<String>,
+    /// Model name
+    pub model: String,
+    /// Temperature for generation
+    pub temperature: Option<f32>,
+    /// Max tokens for generation
+    pub max_tokens: Option<u32>,
+}
+
+impl Default for LlmConfigFile {
+    fn default() -> Self {
+        Self {
+            api_base: "https://api.openai.com/v1".to_string(),
+            api_key: None,
+            model: "gpt-4o-mini".to_string(),
+            temperature: Some(0.7),
+            max_tokens: Some(2048),
+        }
+    }
+}
+
 /// Color configuration for the UI.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ColorConfig {
     /// Chat area gradient start color (Purple by default)
@@ -42,7 +70,7 @@ impl Default for ColorConfig {
 }
 
 /// Behavior configuration for the UI.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct BehaviorConfig {
     /// Number of messages to scroll with Page Up/Down
@@ -67,13 +95,15 @@ impl Default for BehaviorConfig {
 }
 
 /// TTE (Terminal Text Effects) welcome screen configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct WelcomeConfig {
     /// Whether to show the welcome screen at all
     pub enabled: bool,
     /// Whether to use TTE effects (falls back to simple if TTE not installed)
     pub use_tte: bool,
+    /// Use fullscreen canvas (fills entire terminal window)
+    pub fullscreen: bool,
     /// TTE effect to use: "beams", "decrypt", "rain", "slide", "waves", etc.
     pub effect: String,
     /// Row beam speed range (min-max), lower = slower
@@ -97,13 +127,14 @@ impl Default for WelcomeConfig {
         Self {
             enabled: true,
             use_tte: true,
-            effect: "beams".to_string(),
-            beam_row_speed_min: 10,
-            beam_row_speed_max: 25,
-            beam_column_speed_min: 6,
-            beam_column_speed_max: 10,
-            beam_delay: 10,
-            final_wipe_speed: 1,
+            fullscreen: false,
+            effect: "slide".to_string(),
+            beam_row_speed_min: 30,
+            beam_row_speed_max: 80,
+            beam_column_speed_min: 20,
+            beam_column_speed_max: 50,
+            beam_delay: 12,
+            final_wipe_speed: 3,
             gradient_stops: vec![
                 "ff0080".to_string(), // Hot pink
                 "00ffff".to_string(), // Cyan
@@ -119,18 +150,19 @@ impl Default for WelcomeConfig {
 }
 
 /// Main application configuration.
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(default)]
 pub struct Config {
     pub colors: ColorConfig,
     pub behavior: BehaviorConfig,
     pub welcome: WelcomeConfig,
+    pub llm: LlmConfigFile,
 }
 
 impl Config {
-    /// Returns the default config file path: ~/.config/chat-cli/config.toml
+    /// Returns the default config file path: ~/.config/scry-cli/config.toml
     pub fn default_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|p| p.join("chat-cli").join("config.toml"))
+        dirs::config_dir().map(|p| p.join("scry-cli").join("config.toml"))
     }
 
     /// Load configuration from the default path, falling back to defaults.
@@ -145,6 +177,34 @@ impl Config {
         let contents = std::fs::read_to_string(path)?;
         let config: Config = toml::from_str(&contents)?;
         Ok(config)
+    }
+
+    /// Save configuration to the default path.
+    pub fn save(&self) -> anyhow::Result<()> {
+        if let Some(path) = Self::default_path() {
+            self.save_to_path(&path)
+        } else {
+            Err(anyhow::anyhow!("Could not determine config directory"))
+        }
+    }
+
+    /// Save configuration to a specific path.
+    pub fn save_to_path(&self, path: &PathBuf) -> anyhow::Result<()> {
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        
+        let contents = toml::to_string_pretty(self)?;
+        std::fs::write(path, contents)?;
+        Ok(())
+    }
+
+    /// Update LLM config from runtime settings.
+    pub fn update_llm(&mut self, api_base: String, api_key: String, model: String) {
+        self.llm.api_base = api_base;
+        self.llm.api_key = if api_key.is_empty() { None } else { Some(api_key) };
+        self.llm.model = model;
     }
 }
 

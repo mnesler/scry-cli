@@ -1,7 +1,7 @@
 use ratatui::{
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
-    text::Span,
+    text::{Line, Span},
     widgets::{Block, Borders},
 };
 
@@ -18,15 +18,19 @@ pub fn gradient_color(start: (u8, u8, u8), end: (u8, u8, u8), position: f32) -> 
     Color::Rgb(r, g, b)
 }
 
-/// Create a gradient border block with a title.
+/// Create a gradient border block with a title and status indicator.
 ///
 /// # Arguments
-/// * `title` - Block title
+/// * `title` - Block title (left side)
+/// * `status` - Status text (right side)
+/// * `status_color` - Color for status indicator
 /// * `_area` - Layout area (unused, kept for API compatibility)
 /// * `start_color` - Gradient start RGB color
 /// * `end_color` - Gradient end RGB color
-pub fn gradient_block<'a>(
+pub fn gradient_block_with_status<'a>(
     title: &'a str,
+    status: &'a str,
+    status_color: Color,
     _area: Rect,
     start_color: (u8, u8, u8),
     end_color: (u8, u8, u8),
@@ -37,10 +41,14 @@ pub fn gradient_block<'a>(
     Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(mid_color))
-        .title(Span::styled(
+        .title(Line::from(Span::styled(
             title,
             Style::default()
                 .fg(gradient_color(start_color, end_color, 0.8))
                 .add_modifier(Modifier::BOLD),
-        ))
+        )))
+        .title(Line::from(Span::styled(
+            format!(" {} ", status),
+            Style::default().fg(status_color),
+        )).alignment(Alignment::Right))
 }

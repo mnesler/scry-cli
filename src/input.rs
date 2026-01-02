@@ -1,10 +1,10 @@
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{backend::Backend, Terminal};
 
-use crate::app::App;
+use crate::app::{App, InputMode};
 use crate::config::Config;
 use crate::ui;
 
@@ -16,6 +16,9 @@ pub enum HandleResult {
     Exit,
 }
 
+/// Cursor blink interval in milliseconds.
+const CURSOR_BLINK_MS: u64 = 530;
+
 /// Run the main application loop.
 pub fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
@@ -23,21 +26,36 @@ pub fn run_app<B: Backend>(
     config: &Config,
 ) -> io::Result<()> {
     let behavior = &config.behavior;
+    let mut last_cursor_toggle = Instant::now();
 
     loop {
+        // Process any streaming events first
+        app.process_stream();
+        
         terminal.draw(|f| ui::ui(f, app, config))?;
 
-        // Use timeout for animation: fast polling during animation, blocking when done
-        let timeout = if !app.banner_animation_complete {
+        // Toggle cursor blink
+        if last_cursor_toggle.elapsed() >= Duration::from_millis(CURSOR_BLINK_MS) {
+            app.toggle_cursor();
+            last_cursor_toggle = Instant::now();
+        }
+
+        // Use timeout for animation: fast polling during animation/streaming, slower when idle
+        let timeout = if !app.banner_animation_complete || app.is_streaming() {
             Duration::from_millis(behavior.animation_frame_ms)
         } else {
-            Duration::from_millis(behavior.idle_poll_ms)
+            // Use shorter timeout to keep cursor blinking smooth
+            Duration::from_millis(50)
         };
 
         // Poll for events with timeout
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
+                    // Reset cursor to visible on any keypress
+                    app.cursor_visible = true;
+                    last_cursor_toggle = Instant::now();
+                    
                     match handle_key_event(app, key.code, key.modifiers, config) {
                         HandleResult::Exit => return Ok(()),
                         HandleResult::Continue => {}
@@ -45,7 +63,7 @@ pub fn run_app<B: Backend>(
                 }
             }
         }
-        // If no event, loop continues and redraws (for animation)
+        // If no event, loop continues and redraws (for animation/cursor blink/streaming)
     }
 }
 
@@ -83,6 +101,27 @@ fn handle_key_event(
 
 /// Handle key events when the menu is open.
 fn handle_menu_keys(app: &mut App, code: KeyCode) -> HandleResult {
+    // Check if we're in a menu input mode
+    if app.is_menu_input_mode() {
+        match code {
+            KeyCode::Enter => {
+                app.confirm_menu_input();
+            }
+            KeyCode::Esc => {
+                app.cancel_menu_input();
+            }
+            KeyCode::Backspace => {
+                app.handle_menu_backspace();
+            }
+            KeyCode::Char(c) => {
+                app.handle_menu_char(c);
+            }
+            _ => {}
+        }
+        return HandleResult::Continue;
+    }
+
+    // Normal menu navigation
     match code {
         KeyCode::Up => {
             app.menu_up();
@@ -96,11 +135,32 @@ fn handle_menu_keys(app: &mut App, code: KeyCode) -> HandleResult {
             let menu_items = App::menu_items();
             if let Some(selected) = menu_items.get(app.menu_selected) {
                 match *selected {
+                    "API Key" => {
+                        app.start_menu_input(InputMode::ApiKey);
+                    }
+                    "API Base URL" => {
+                        app.start_menu_input(InputMode::ApiBase);
+                    }
+                    "Model" => {
+                        app.start_menu_input(InputMode::Model);
+                    }
+                    "Save Config" => {
+                        // Save config to file
+                        if let Err(e) = app.save_config() {
+                            app.messages.push(crate::message::Message::assistant(
+                                format!("Failed to save config: {}", e)
+                            ));
+                        } else {
+                            app.messages.push(crate::message::Message::assistant(
+                                "Configuration saved successfully!".to_string()
+                            ));
+                        }
+                        app.show_menu = false;
+                    }
                     "Exit" => {
                         return HandleResult::Exit;
                     }
                     _ => {
-                        // Other menu items don't do anything yet
                         app.show_menu = false;
                     }
                 }

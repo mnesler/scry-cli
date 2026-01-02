@@ -1,5 +1,5 @@
-# Chat CLI Configuration
-# Copy this file to ~/.config/chat-cli/config.toml
+# Scry CLI Configuration
+# Copy this file to ~/.config/scry-cli/config.toml
 
 [colors]
 # Chat area gradient (Purple -> Blue)
@@ -38,6 +38,10 @@ enabled = true
 # TTE must be installed: pip install terminaltexteffects
 use_tte = true
 
+# Use fullscreen canvas (animation fills entire terminal window)
+# When false, animation only covers the banner text area
+fullscreen = false
+
 # TTE effect to use. Available effects:
 # "beams", "decrypt", "rain", "slide", "waves", and more
 # See: https://chrisbuilds.github.io/terminaltexteffects/
@@ -46,19 +50,19 @@ effect = "beams"
 # === Beams Effect Settings ===
 # These settings only apply when effect = "beams"
 
-# Row beam speed range (min-max). Lower values = slower animation
-beam_row_speed_min = 10
-beam_row_speed_max = 25
+# Row beam speed range (min-max). Higher values = faster animation
+beam_row_speed_min = 30
+beam_row_speed_max = 80
 
-# Column beam speed range (min-max). Lower values = slower animation
-beam_column_speed_min = 6
-beam_column_speed_max = 10
+# Column beam speed range (min-max). Higher values = faster animation
+beam_column_speed_min = 20
+beam_column_speed_max = 50
 
-# Delay between beam groups (higher = more staggered)
-beam_delay = 10
+# Delay between beam groups (lower = faster start)
+beam_delay = 3
 
-# Final wipe animation speed (lower = slower)
-final_wipe_speed = 1
+# Final wipe animation speed (higher = faster)
+final_wipe_speed = 3
 
 # === Gradient Colors ===
 # Colors are hex values WITHOUT the # prefix

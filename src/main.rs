@@ -1,10 +1,11 @@
-//! Chat CLI - A beautiful terminal-based chat interface.
+//! Scry CLI - A beautiful terminal-based chat interface.
 //!
 //! Built with Rust, Ratatui, and Miami vibes.
 
 mod app;
 mod config;
 mod input;
+mod llm;
 mod message;
 mod ui;
 mod welcome;
@@ -21,7 +22,8 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use app::App;
 use config::Config;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     // Load configuration
     let config = Config::load();
 
@@ -38,7 +40,7 @@ fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Create app (without the old banner since we showed TTE welcome)
-    let mut app = App::new_without_banner();
+    let mut app = App::new_without_banner_with_config(&config);
 
     // Run app
     let res = input::run_app(&mut terminal, &mut app, &config);

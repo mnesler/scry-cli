@@ -1,4 +1,4 @@
-# Chat CLI
+# Scry CLI
 
 A beautiful terminal-based chat interface built with Rust and Ratatui, featuring gradient borders, smooth scrolling, and optional Terminal Text Effects (TTE) integration.
 
@@ -36,7 +36,7 @@ If TTE is not installed, the app will display a simple welcome message instead.
 cargo build --release
 ```
 
-The compiled binary will be at `target/release/chat-cli`
+The compiled binary will be at `target/release/scry-cli`
 
 ### Run
 
@@ -45,7 +45,7 @@ The compiled binary will be at `target/release/chat-cli`
 cargo run --release
 
 # Or run the compiled binary
-./target/release/chat-cli
+./target/release/scry-cli
 ```
 
 ## Controls
@@ -73,13 +73,13 @@ cargo run --release
 
 ## Configuration
 
-Chat CLI supports configuration via TOML file at `~/.config/chat-cli/config.toml`.
+Scry CLI supports configuration via TOML file at `~/.config/scry-cli/config.toml`.
 
 Copy the example config to get started:
 
 ```bash
-mkdir -p ~/.config/chat-cli
-cp docs/config.example.toml ~/.config/chat-cli/config.toml
+mkdir -p ~/.config/scry-cli
+cp docs/config.example.toml ~/.config/scry-cli/config.toml
 ```
 
 ### Configurable Options
@@ -100,7 +100,7 @@ See [docs/config.example.toml](docs/config.example.toml) for the full example.
 ## Project Structure
 
 ```
-chat-cli/
+scry-cli/
 ├── src/
 │   ├── main.rs          # Entry point, terminal setup
 │   ├── app.rs           # Application state and logic
