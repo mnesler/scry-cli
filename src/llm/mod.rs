@@ -167,6 +167,128 @@ impl Provider {
     }
 }
 
+/// Validate an API key by making a minimal request to the provider.
+///
+/// This function makes a real API request to verify the key is valid.
+/// Returns `Ok(())` if the key is valid (including rate limited - 429).
+/// Returns an error message if the key is invalid or the request fails.
+///
+/// # Note
+/// This may incur minimal API costs (~1 token for most providers).
+pub async fn validate_api_key(provider: Provider, api_key: &str) -> Result<(), String> {
+    use reqwest::Client;
+
+    // Handle providers that don't use API keys first
+    match provider {
+        Provider::Ollama => {
+            // Ollama doesn't need API key validation
+            return Ok(());
+        }
+        Provider::GitHubCopilot => {
+            // Copilot uses OAuth, not API keys
+            return Err("GitHub Copilot uses OAuth authentication, not API keys".to_string());
+        }
+        _ => {}
+    }
+
+    // Check format for API key providers
+    provider
+        .validate_api_key_format(api_key)
+        .map_err(|e| e.to_string())?;
+
+    let client = Client::new();
+
+    match provider {
+        Provider::Anthropic => validate_anthropic_key(&client, api_key).await,
+        Provider::OpenRouter => validate_openrouter_key(&client, api_key).await,
+        Provider::Ollama | Provider::GitHubCopilot => {
+            // Already handled above
+            unreachable!()
+        }
+    }
+}
+
+/// Validate an Anthropic API key by making a minimal request.
+async fn validate_anthropic_key(client: &reqwest::Client, api_key: &str) -> Result<(), String> {
+    // Use the messages endpoint with max_tokens=1 for minimal cost
+    let response = client
+        .post("https://api.anthropic.com/v1/messages")
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "model": "claude-sonnet-4-5",
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "Hi"}]
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Connection failed: {}", e))?;
+
+    let status = response.status();
+
+    // 200 = valid key, working
+    // 429 = valid key, rate limited (treat as valid)
+    // 400 = might be valid but bad request (treat as valid for format check)
+    if status.is_success() || status.as_u16() == 429 || status.as_u16() == 400 {
+        return Ok(());
+    }
+
+    // 401 = invalid key
+    if status.as_u16() == 401 {
+        return Err("Invalid API key".to_string());
+    }
+
+    // 403 = forbidden (might be permissions issue)
+    if status.as_u16() == 403 {
+        return Err("API key forbidden - check permissions".to_string());
+    }
+
+    // Other errors
+    let body = response.text().await.unwrap_or_default();
+    Err(format!("API error ({}): {}", status, body))
+}
+
+/// Validate an OpenRouter API key by making a minimal request.
+async fn validate_openrouter_key(client: &reqwest::Client, api_key: &str) -> Result<(), String> {
+    // OpenRouter uses OpenAI-compatible API format
+    let response = client
+        .post("https://openrouter.ai/api/v1/chat/completions")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "model": "openai/gpt-4o-mini",
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "Hi"}]
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Connection failed: {}", e))?;
+
+    let status = response.status();
+
+    // 200 = valid key, working
+    // 429 = valid key, rate limited (treat as valid)
+    // 400 = might be valid but bad request (treat as valid for format check)
+    if status.is_success() || status.as_u16() == 429 || status.as_u16() == 400 {
+        return Ok(());
+    }
+
+    // 401 = invalid key
+    if status.as_u16() == 401 {
+        return Err("Invalid API key".to_string());
+    }
+
+    // 403 = forbidden
+    if status.as_u16() == 403 {
+        return Err("API key forbidden - check permissions".to_string());
+    }
+
+    // Other errors
+    let body = response.text().await.unwrap_or_default();
+    Err(format!("API error ({}): {}", status, body))
+}
+
 /// Chat message for API requests.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -482,5 +604,44 @@ mod tests {
         assert!(Provider::GitHubCopilot
             .validate_api_key_format("anything")
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn test_validate_api_key_format_check_anthropic() {
+        // Invalid format should fail before network request
+        let result = validate_api_key(Provider::Anthropic, "invalid-key").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("sk-ant-"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_api_key_format_check_openrouter() {
+        // Invalid format should fail before network request
+        let result = validate_api_key(Provider::OpenRouter, "invalid-key").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("sk-or-"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_api_key_ollama() {
+        // Ollama doesn't need validation - should always succeed
+        let result = validate_api_key(Provider::Ollama, "anything").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_validate_api_key_copilot_fails() {
+        // Copilot uses OAuth, not API keys
+        let result = validate_api_key(Provider::GitHubCopilot, "anything").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("OAuth"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_api_key_empty() {
+        // Empty key should fail
+        let result = validate_api_key(Provider::Anthropic, "").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("empty"));
     }
 }
