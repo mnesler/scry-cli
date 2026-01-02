@@ -1034,12 +1034,17 @@ impl App {
             _ => return,
         };
 
-        self.connect = ConnectState::EnteringApiKey {
-            provider,
-            input: String::new(),
-            cursor: 0,
-            error: None,
-        };
+        // OAuth providers should use device flow, not API key entry
+        if provider.uses_oauth() {
+            self.start_oauth_flow(provider);
+        } else {
+            self.connect = ConnectState::EnteringApiKey {
+                provider,
+                input: String::new(),
+                cursor: 0,
+                error: None,
+            };
+        }
     }
 
     /// Start async validation of an API key.
@@ -1081,7 +1086,7 @@ impl App {
         self.toast_info("Validating Copilot token...".to_string());
 
         tokio::spawn(async move {
-            let mut provider = CopilotProvider::new();
+            let provider = CopilotProvider::new();
             // Set the OAuth token so validate_token can use it
             *provider.oauth_token.write().await = Some(key);
             
@@ -1613,6 +1618,27 @@ mod tests {
                 assert!(error.is_none());
             }
             _ => panic!("Expected EnteringApiKey state"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_enter_new_credentials_oauth_provider() {
+        let mut app = App::new_without_banner();
+        app.connect = ConnectState::ExistingCredential {
+            provider: Provider::GitHubCopilot,
+            masked_key: "gho_...xyz".to_string(),
+            current_model: Some("claude-sonnet-4.5".to_string()),
+            selected: 2,
+        };
+
+        app.enter_new_credentials();
+
+        // OAuth providers should transition to OAuthPending, not EnteringApiKey
+        match &app.connect {
+            ConnectState::OAuthPending { provider, .. } => {
+                assert_eq!(*provider, Provider::GitHubCopilot);
+            }
+            _ => panic!("Expected OAuthPending state for OAuth provider, got {:?}", app.connect),
         }
     }
 

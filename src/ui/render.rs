@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::app::{App, ConnectState};
 use crate::config::Config;
-use crate::llm::COPILOT_MODELS;
+use crate::llm::{Provider, COPILOT_MODELS};
 use crate::message::Role;
 
 use super::gradient::gradient_color;
@@ -226,7 +226,7 @@ pub fn render_connect_dialog(f: &mut Frame, app: &App) {
         } => {
             render_existing_credential_dialog(
                 f,
-                provider.display_name(),
+                *provider,
                 masked_key,
                 current_model.as_deref(),
                 *selected,
@@ -265,7 +265,7 @@ pub fn render_connect_dialog(f: &mut Frame, app: &App) {
 /// Render the "existing credential" dialog.
 fn render_existing_credential_dialog(
     f: &mut Frame,
-    provider_name: &str,
+    provider: Provider,
     masked_key: &str,
     current_model: Option<&str>,
     selected: usize,
@@ -274,7 +274,7 @@ fn render_existing_credential_dialog(
     f.render_widget(Clear, area);
 
     let block = Block::default()
-        .title(format!(" Already Connected to {} ", provider_name))
+        .title(format!(" Already Connected to {} ", provider.display_name()))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan))
         .style(Style::default().bg(Color::Black));
@@ -304,11 +304,18 @@ fn render_existing_credential_dialog(
         .style(Style::default().fg(Color::Gray));
     f.render_widget(info, chunks[0]);
 
-    // Options - dynamic based on whether model is saved
-    let options = if has_saved_model {
-        vec!["Use existing credentials", "Change model", "Enter new credentials", "Cancel"]
+    // Options - dynamic based on whether model is saved and provider type
+    // For OAuth providers, use "Re-authenticate" instead of "Enter new credentials"
+    let new_cred_text = if provider.uses_oauth() {
+        "Re-authenticate"
     } else {
-        vec!["Use existing credentials", "Enter new credentials", "Cancel"]
+        "Enter new credentials"
+    };
+    
+    let options = if has_saved_model {
+        vec!["Use existing credentials", "Change model", new_cred_text, "Cancel"]
+    } else {
+        vec!["Use existing credentials", new_cred_text, "Cancel"]
     };
     let lines: Vec<Line> = options
         .iter()
