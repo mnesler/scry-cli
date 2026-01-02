@@ -1,4 +1,5 @@
 use ratatui::widgets::ScrollbarState;
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 use crate::auth::{DeviceCode, OAuthToken};
@@ -51,6 +52,8 @@ pub enum ConnectState {
     ValidatingKey {
         provider: Provider,
         key: String,
+        /// For Copilot: the model to use after validation succeeds
+        model: Option<String>,
     },
     /// OAuth device code flow pending (waiting for device code).
     OAuthPending {
@@ -434,6 +437,9 @@ pub struct App {
     pub oauth_rx: Option<tokio::sync::oneshot::Receiver<Result<OAuthToken, String>>>,
     /// Receiver for async device code request
     pub device_code_rx: Option<tokio::sync::oneshot::Receiver<Result<DeviceCode, String>>>,
+    /// Session-scoped cache of validated OAuth tokens (cleared on app restart).
+    /// Maps provider storage key (e.g., "github_copilot") to validation status.
+    pub validated_tokens: HashMap<String, bool>,
 }
 
 impl App {
@@ -458,6 +464,7 @@ impl App {
             validation_rx: None,
             oauth_rx: None,
             device_code_rx: None,
+            validated_tokens: HashMap::new(),
         }
     }
 
@@ -485,6 +492,7 @@ impl App {
             validation_rx: None,
             oauth_rx: None,
             device_code_rx: None,
+            validated_tokens: HashMap::new(),
         }
     }
 
@@ -610,6 +618,26 @@ impl App {
                         }
                         self.llm.stream_rx = None;
                         self.llm.status = ConnectionStatus::Error(e);
+                    }
+                    StreamEvent::AuthError => {
+                        use crate::auth::AuthStorage;
+                        
+                        // Clear invalid credentials from storage
+                        if self.llm.config.provider == Provider::GitHubCopilot {
+                            let mut storage = AuthStorage::load().unwrap_or_default();
+                            storage.remove(Provider::GitHubCopilot.storage_key());
+                            let _ = storage.save();
+                            
+                            // Clear validation cache
+                            self.validated_tokens.remove(Provider::GitHubCopilot.storage_key());
+                        }
+                        
+                        // Show error toast but preserve chat history
+                        self.toast_error("Session expired. Please reconnect to continue chatting.".to_string());
+                        
+                        // Update status
+                        self.llm.stream_rx = None;
+                        self.llm.status = ConnectionStatus::NotConfigured;
                     }
                 },
                 Err(mpsc::error::TryRecvError::Empty) => {
@@ -893,7 +921,7 @@ impl App {
     ///
     /// Shows the error in the EnteringApiKey state so the user can try again.
     pub fn connection_error(&mut self, error: String) {
-        if let ConnectState::ValidatingKey { provider, key } = &self.connect {
+        if let ConnectState::ValidatingKey { provider, key, .. } = &self.connect {
             self.connect = ConnectState::EnteringApiKey {
                 provider: *provider,
                 input: key.clone(),
@@ -918,17 +946,25 @@ impl App {
                     
                     // Special handling for Copilot
                     if provider == Provider::GitHubCopilot {
-                        // If model is saved, connect directly with it
+                        // If model is saved, check validation cache
                         if let Some(model) = cred.model() {
-                            self.llm.config.provider = provider;
-                            self.llm.config.api_base = provider.default_api_base().to_string();
-                            self.llm.config.model = model.to_string();
-                            self.llm.config.api_key = key;
-                            self.llm.apply_config();
-                            self.connect = ConnectState::None;
-                            self.toast_success(format!("Connected to {} with {}", 
-                                provider.display_name(), model));
-                            return;
+                            // Check if token was already validated this session
+                            if self.validated_tokens.get(provider.storage_key()) == Some(&true) {
+                                // Already validated - connect directly
+                                self.llm.config.provider = provider;
+                                self.llm.config.api_base = provider.default_api_base().to_string();
+                                self.llm.config.model = model.to_string();
+                                self.llm.config.api_key = key;
+                                self.llm.apply_config();
+                                self.connect = ConnectState::None;
+                                self.toast_success(format!("Connected to {} with {}", 
+                                    provider.display_name(), model));
+                                return;
+                            } else {
+                                // Need to validate token first
+                                self.start_copilot_validation(key.clone(), model.to_string());
+                                return;
+                            }
                         }
                         
                         // No saved model - show model selection dialog
@@ -1017,10 +1053,41 @@ impl App {
         self.connect = ConnectState::ValidatingKey {
             provider,
             key: key.clone(),
+            model: None,
         };
 
         tokio::spawn(async move {
             let result = validate_api_key(provider, &key).await;
+            let _ = tx.send(result);
+        });
+    }
+
+    /// Start async validation of a Copilot OAuth token.
+    ///
+    /// Spawns a background task to validate the token with the Copilot API.
+    /// On success, connects with the saved model. On failure, prompts for re-authentication.
+    fn start_copilot_validation(&mut self, key: String, model: String) {
+        use crate::llm::CopilotProvider;
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.validation_rx = Some(rx);
+        
+        self.connect = ConnectState::ValidatingKey {
+            provider: Provider::GitHubCopilot,
+            key: key.clone(),
+            model: Some(model),
+        };
+        
+        self.toast_info("Validating Copilot token...".to_string());
+
+        tokio::spawn(async move {
+            let mut provider = CopilotProvider::new();
+            // Set the OAuth token so validate_token can use it
+            *provider.oauth_token.write().await = Some(key);
+            
+            let result = provider.validate_token().await
+                .map(|_| ())
+                .map_err(|e| e.to_string());
             let _ = tx.send(result);
         });
     }
@@ -1034,15 +1101,39 @@ impl App {
             match rx.try_recv() {
                 Ok(Ok(())) => {
                     // Validation succeeded
-                    if let ConnectState::ValidatingKey { provider, key } = &self.connect {
+                    if let ConnectState::ValidatingKey { provider, key, model } = &self.connect {
                         let provider = *provider;
                         let key = key.clone();
-                        self.complete_connection(provider, Some(key));
+                        let model = model.clone();
+                        
+                        // For Copilot with model, cache validation and connect with model
+                        if provider == Provider::GitHubCopilot && model.is_some() {
+                            self.validated_tokens.insert(provider.storage_key().to_string(), true);
+                            
+                            // Connect with the validated model
+                            let model_name = model.unwrap();
+                            self.llm.config.provider = provider;
+                            self.llm.config.api_base = provider.default_api_base().to_string();
+                            self.llm.config.model = model_name.clone();
+                            self.llm.config.api_key = key;
+                            self.llm.apply_config();
+                            self.connect = ConnectState::None;
+                            self.toast_success(format!("Connected to {} with {}", 
+                                provider.display_name(), model_name));
+                        } else {
+                            // Regular connection flow for other providers
+                            self.complete_connection(provider, Some(key));
+                        }
                     }
                     return true;
                 }
                 Ok(Err(e)) => {
-                    // Validation failed
+                    // Validation failed - clear cache if Copilot
+                    if let ConnectState::ValidatingKey { provider, .. } = &self.connect {
+                        if *provider == Provider::GitHubCopilot {
+                            self.validated_tokens.remove(provider.storage_key());
+                        }
+                    }
                     self.connection_error(e);
                     return true;
                 }
@@ -1353,6 +1444,7 @@ mod tests {
         let state = ConnectState::ValidatingKey {
             provider: Provider::Anthropic,
             key: "sk-ant-test".to_string(),
+            model: None,
         };
         assert!(state.is_active());
     }
@@ -1440,6 +1532,7 @@ mod tests {
         app.connect = ConnectState::ValidatingKey {
             provider: Provider::Anthropic,
             key: "sk-ant-test-key".to_string(),
+            model: None,
         };
 
         app.connection_error("Invalid API key".to_string());
@@ -1465,6 +1558,7 @@ mod tests {
         app.connect = ConnectState::ValidatingKey {
             provider: Provider::Anthropic,
             key: "sk-ant-test".to_string(),
+            model: None,
         };
 
         app.complete_connection(Provider::Anthropic, Some("sk-ant-test".to_string()));
@@ -1824,6 +1918,43 @@ mod tests {
             assert_eq!(current_model, None);
         } else {
             panic!("Expected ExistingCredential");
+        }
+    }
+
+    #[test]
+    fn test_validated_tokens_cache_initialized_empty() {
+        let app = App::new_without_banner();
+        assert!(app.validated_tokens.is_empty());
+    }
+
+    #[test]
+    fn test_validated_tokens_cache_can_insert() {
+        let mut app = App::new_without_banner();
+        app.validated_tokens.insert("github_copilot".to_string(), true);
+        assert_eq!(app.validated_tokens.get("github_copilot"), Some(&true));
+    }
+
+    #[test]
+    fn test_validating_key_state_with_model() {
+        let state = ConnectState::ValidatingKey {
+            provider: Provider::GitHubCopilot,
+            key: "test_token".to_string(),
+            model: Some("claude-sonnet-4.5".to_string()),
+        };
+        assert!(state.is_active());
+        assert_eq!(state.provider(), Some(Provider::GitHubCopilot));
+    }
+
+    #[test]
+    fn test_validating_key_state_without_model() {
+        let state = ConnectState::ValidatingKey {
+            provider: Provider::Anthropic,
+            key: "sk-ant-test".to_string(),
+            model: None,
+        };
+        assert!(state.is_active());
+        if let ConnectState::ValidatingKey { model, .. } = state {
+            assert_eq!(model, None);
         }
     }
 }

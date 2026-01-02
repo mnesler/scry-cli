@@ -88,7 +88,7 @@ pub struct CopilotProvider {
     temperature: Option<f32>,
     max_tokens: Option<u32>,
     /// Cached OAuth token from GitHub.
-    oauth_token: Arc<RwLock<Option<String>>>,
+    pub oauth_token: Arc<RwLock<Option<String>>>,
     /// Cached Copilot API token.
     copilot_token: Arc<RwLock<Option<TokenState>>>,
 }
@@ -188,6 +188,56 @@ impl CopilotProvider {
         DeviceCodeFlow::github_copilot()
     }
 
+    /// Validate an OAuth token by making a minimal API request.
+    ///
+    /// This makes a real API request with max_tokens=1 to verify the token is valid.
+    /// Returns `Ok(())` if valid (including rate limited - 429).
+    /// Returns an error if the token is invalid or the request fails.
+    pub async fn validate_token(&self) -> Result<()> {
+        let copilot_token = self.get_copilot_token().await?;
+
+        // Minimal request with max_tokens=1 to check authentication
+        let request_body = CopilotRequest {
+            model: self.model.clone(),
+            messages: vec![CopilotMessage {
+                role: "user".to_string(),
+                content: "Hi".to_string(),
+            }],
+            stream: false,
+            temperature: Some(0.0),
+            max_tokens: Some(1),
+        };
+
+        let response = self
+            .client
+            .post("https://api.githubcopilot.com/chat/completions")
+            .header("Authorization", format!("Bearer {}", copilot_token))
+            .header("Content-Type", "application/json")
+            .header("Copilot-Integration-Id", "vscode-chat")
+            .header("Editor-Version", "scry-cli/0.1.0")
+            .json(&request_body)
+            .send()
+            .await
+            .context("Failed to validate token")?;
+
+        let status = response.status();
+
+        // 200-299 = valid token
+        // 429 = rate limited, but token is valid
+        if status.is_success() || status.as_u16() == 429 {
+            return Ok(());
+        }
+
+        // 401/403 = invalid or expired token
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            return Err(anyhow!("Invalid or expired OAuth token"));
+        }
+
+        // Other errors
+        let body = response.text().await.unwrap_or_default();
+        Err(anyhow!("Token validation failed ({}): {}", status, body))
+    }
+
     /// Exchange OAuth token for Copilot API token.
     async fn get_copilot_token(&self) -> Result<String> {
         // Check if we have a valid cached token
@@ -246,91 +296,122 @@ impl CopilotProvider {
         Ok(token)
     }
 
-    /// Send a streaming chat request.
+    /// Send a streaming chat request with retry logic.
     async fn stream_chat_inner(
         &self,
         messages: Vec<ChatMessage>,
         tx: mpsc::Sender<StreamEvent>,
     ) -> Result<()> {
-        let copilot_token = self.get_copilot_token().await?;
+        self.stream_chat_with_retry(messages, tx, 0).await
+    }
 
-        let copilot_messages: Vec<CopilotMessage> = messages
-            .into_iter()
-            .map(|m| CopilotMessage {
-                role: m.role,
-                content: m.content,
-            })
-            .collect();
+    /// Send a streaming chat request with exponential backoff retry.
+    fn stream_chat_with_retry(
+        &self,
+        messages: Vec<ChatMessage>,
+        tx: mpsc::Sender<StreamEvent>,
+        retry_count: u32,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + '_>> {
+        Box::pin(async move {
+            let copilot_token = self.get_copilot_token().await?;
 
-        let request_body = CopilotRequest {
-            model: self.model.clone(),
-            messages: copilot_messages,
-            stream: true,
-            temperature: self.temperature,
-            max_tokens: self.max_tokens,
-        };
+            let copilot_messages: Vec<CopilotMessage> = messages
+                .iter()
+                .map(|m| CopilotMessage {
+                    role: m.role.clone(),
+                    content: m.content.clone(),
+                })
+                .collect();
 
-        let response = self
-            .client
-            .post("https://api.githubcopilot.com/chat/completions")
-            .header("Authorization", format!("Bearer {}", copilot_token))
-            .header("Content-Type", "application/json")
-            .header("Accept", "text/event-stream")
-            .header("Copilot-Integration-Id", "vscode-chat")
-            .header("Editor-Version", "scry-cli/0.1.0")
-            .json(&request_body)
-            .send()
-            .await
-            .context("Failed to send chat request")?;
+            let request_body = CopilotRequest {
+                model: self.model.clone(),
+                messages: copilot_messages,
+                stream: true,
+                temperature: self.temperature,
+                max_tokens: self.max_tokens,
+            };
 
-        if !response.status().is_success() {
+            let response = self
+                .client
+                .post("https://api.githubcopilot.com/chat/completions")
+                .header("Authorization", format!("Bearer {}", copilot_token))
+                .header("Content-Type", "application/json")
+                .header("Accept", "text/event-stream")
+                .header("Copilot-Integration-Id", "vscode-chat")
+                .header("Editor-Version", "scry-cli/0.1.0")
+                .json(&request_body)
+                .send()
+                .await
+                .context("Failed to send chat request")?;
+
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Copilot API error ({}): {}", status, body));
-        }
 
-        let mut stream = response.bytes_stream();
-        let mut buffer = String::new();
-
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.context("Error reading stream")?;
-            let text = String::from_utf8_lossy(&chunk);
-            buffer.push_str(&text);
-
-            // Process complete lines
-            while let Some(newline_pos) = buffer.find('\n') {
-                let line = buffer[..newline_pos].trim().to_string();
-                buffer = buffer[newline_pos + 1..].to_string();
-
-                if line.is_empty() {
-                    continue;
+            // Handle authentication errors with retry
+            if status.as_u16() == 401 || status.as_u16() == 403 {
+                if retry_count < 3 {
+                    // Exponential backoff: 2^retry_count seconds (2s, 4s, 8s)
+                    let delay_secs = 2_u64.pow(retry_count);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(delay_secs)).await;
+                    
+                    // Clear cached token and retry
+                    *self.copilot_token.write().await = None;
+                    
+                    return self.stream_chat_with_retry(messages, tx, retry_count + 1).await;
+                } else {
+                    // Max retries exceeded - send AuthError event
+                    tx.send(StreamEvent::AuthError).await.ok();
+                    return Err(anyhow!("Authentication failed after {} retries", retry_count));
                 }
+            }
 
-                if let Some(data) = line.strip_prefix("data: ") {
-                    if data == "[DONE]" {
-                        tx.send(StreamEvent::Done).await.ok();
-                        return Ok(());
+            if !status.is_success() {
+                let body = response.text().await.unwrap_or_default();
+                return Err(anyhow!("Copilot API error ({}): {}", status, body));
+            }
+
+            let mut stream = response.bytes_stream();
+            let mut buffer = String::new();
+
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.context("Error reading stream")?;
+                let text = String::from_utf8_lossy(&chunk);
+                buffer.push_str(&text);
+
+                // Process complete lines
+                while let Some(newline_pos) = buffer.find('\n') {
+                    let line = buffer[..newline_pos].trim().to_string();
+                    buffer = buffer[newline_pos + 1..].to_string();
+
+                    if line.is_empty() {
+                        continue;
                     }
 
-                    if let Ok(delta) = serde_json::from_str::<StreamDelta>(data) {
-                        for choice in delta.choices {
-                            if let Some(content) = choice.delta.content {
-                                if !content.is_empty() {
-                                    tx.send(StreamEvent::Token(content)).await.ok();
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if data == "[DONE]" {
+                            tx.send(StreamEvent::Done).await.ok();
+                            return Ok(());
+                        }
+
+                        if let Ok(delta) = serde_json::from_str::<StreamDelta>(data) {
+                            for choice in delta.choices {
+                                if let Some(content) = choice.delta.content {
+                                    if !content.is_empty() {
+                                        tx.send(StreamEvent::Token(content)).await.ok();
+                                    }
                                 }
-                            }
-                            if choice.finish_reason.is_some() {
-                                tx.send(StreamEvent::Done).await.ok();
-                                return Ok(());
+                                if choice.finish_reason.is_some() {
+                                    tx.send(StreamEvent::Done).await.ok();
+                                    return Ok(());
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        tx.send(StreamEvent::Done).await.ok();
-        Ok(())
+            tx.send(StreamEvent::Done).await.ok();
+            Ok(())
+        })
     }
 }
 
@@ -493,5 +574,21 @@ mod tests {
     async fn test_copilot_provider_no_oauth_token() {
         let provider = CopilotProvider::new();
         assert!(!provider.has_oauth_token().await);
+    }
+
+    #[tokio::test]
+    async fn test_copilot_provider_oauth_token_accessible() {
+        let provider = CopilotProvider::new();
+        // Test that oauth_token field is public and writable
+        *provider.oauth_token.write().await = Some("test_token".to_string());
+        assert!(provider.has_oauth_token().await);
+    }
+
+    #[tokio::test]
+    async fn test_copilot_validate_token_fails_without_oauth() {
+        let provider = CopilotProvider::new();
+        // Should fail because no OAuth token is set
+        let result = provider.validate_token().await;
+        assert!(result.is_err());
     }
 }

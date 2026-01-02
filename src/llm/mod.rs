@@ -318,6 +318,9 @@ pub enum StreamEvent {
     Done,
     /// An error occurred.
     Error(String),
+    /// Authentication error - token is invalid or expired.
+    /// The app should clear credentials and prompt for re-authentication.
+    AuthError,
 }
 
 /// LLM client configuration.
