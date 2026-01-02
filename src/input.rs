@@ -6,6 +6,7 @@ use ratatui::{backend::Backend, Terminal};
 
 use crate::app::{App, MenuItem};
 use crate::config::Config;
+use crate::llm::Provider;
 use crate::ui;
 
 /// Result of handling a key event.
@@ -101,19 +102,32 @@ fn handle_key_event(
 
 /// Handle key events when the menu is open.
 fn handle_menu_keys(app: &mut App, code: KeyCode) -> HandleResult {
+    if app.menu.in_submenu {
+        handle_submenu_keys(app, code)
+    } else {
+        handle_main_menu_keys(app, code)
+    }
+}
+
+/// Handle key events in the main menu.
+fn handle_main_menu_keys(app: &mut App, code: KeyCode) -> HandleResult {
     match code {
         KeyCode::Up => {
             app.menu_up();
         }
         KeyCode::Down => {
             let menu_count = App::menu_items().len();
-            app.menu_down(menu_count);
+            app.menu_down(menu_count, 0);
         }
-        KeyCode::Enter => {
+        KeyCode::Enter | KeyCode::Right => {
             // Handle menu selection
             let menu_items = App::menu_items();
             if let Some(&selected) = menu_items.get(app.menu.selected) {
                 match selected {
+                    MenuItem::ConnectProvider => {
+                        // Enter the provider submenu
+                        app.menu.enter_submenu();
+                    }
                     MenuItem::Exit => {
                         return HandleResult::Exit;
                     }
@@ -121,7 +135,32 @@ fn handle_menu_keys(app: &mut App, code: KeyCode) -> HandleResult {
             }
         }
         KeyCode::Esc => {
-            app.menu.visible = false;
+            app.menu.close();
+        }
+        _ => {}
+    }
+    HandleResult::Continue
+}
+
+/// Handle key events in a submenu (e.g., provider selection).
+fn handle_submenu_keys(app: &mut App, code: KeyCode) -> HandleResult {
+    match code {
+        KeyCode::Up => {
+            app.menu_up();
+        }
+        KeyCode::Down => {
+            let submenu_count = Provider::all().len();
+            app.menu_down(0, submenu_count);
+        }
+        KeyCode::Enter => {
+            // Select the provider
+            if let Some(provider) = app.selected_provider() {
+                app.switch_provider(provider);
+            }
+        }
+        KeyCode::Esc | KeyCode::Left => {
+            // Go back to main menu
+            app.menu.exit_submenu();
         }
         _ => {}
     }

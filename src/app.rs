@@ -2,7 +2,7 @@ use ratatui::widgets::ScrollbarState;
 use tokio::sync::mpsc;
 
 use crate::config::Config;
-use crate::llm::{ChatMessage, LlmClient, LlmConfig, StreamEvent};
+use crate::llm::{ChatMessage, LlmClient, LlmConfig, Provider, StreamEvent};
 use crate::message::{Message, Role};
 
 /// Connection status for the LLM.
@@ -29,6 +29,7 @@ pub enum InputMode {
 /// Menu items available in the settings menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuItem {
+    ConnectProvider,
     Exit,
 }
 
@@ -36,6 +37,7 @@ impl MenuItem {
     /// Returns all menu items in display order.
     pub const fn all() -> &'static [MenuItem] {
         &[
+            MenuItem::ConnectProvider,
             MenuItem::Exit,
         ]
     }
@@ -43,8 +45,14 @@ impl MenuItem {
     /// Returns the display label for this menu item.
     pub const fn label(&self) -> &'static str {
         match self {
+            MenuItem::ConnectProvider => "Connect Provider",
             MenuItem::Exit => "Exit",
         }
+    }
+
+    /// Check if this menu item has a submenu.
+    pub const fn has_submenu(&self) -> bool {
+        matches!(self, MenuItem::ConnectProvider)
     }
 }
 
@@ -165,6 +173,10 @@ pub struct MenuState {
     pub visible: bool,
     /// Currently selected menu item index
     pub selected: usize,
+    /// Whether we're in a submenu
+    pub in_submenu: bool,
+    /// Currently selected submenu item index
+    pub submenu_selected: usize,
 }
 
 impl MenuState {
@@ -173,21 +185,51 @@ impl MenuState {
         self.visible = !self.visible;
         if self.visible {
             self.selected = 0;
+            self.in_submenu = false;
+            self.submenu_selected = 0;
         }
     }
 
     /// Move menu selection up.
     pub fn up(&mut self) {
-        if self.selected > 0 {
+        if self.in_submenu {
+            if self.submenu_selected > 0 {
+                self.submenu_selected -= 1;
+            }
+        } else if self.selected > 0 {
             self.selected -= 1;
         }
     }
 
     /// Move menu selection down.
-    pub fn down(&mut self, menu_items_count: usize) {
-        if self.selected < menu_items_count - 1 {
+    pub fn down(&mut self, menu_items_count: usize, submenu_items_count: usize) {
+        if self.in_submenu {
+            if self.submenu_selected < submenu_items_count.saturating_sub(1) {
+                self.submenu_selected += 1;
+            }
+        } else if self.selected < menu_items_count.saturating_sub(1) {
             self.selected += 1;
         }
+    }
+
+    /// Enter submenu if current item has one.
+    pub fn enter_submenu(&mut self) {
+        self.in_submenu = true;
+        self.submenu_selected = 0;
+    }
+
+    /// Exit submenu back to main menu.
+    pub fn exit_submenu(&mut self) {
+        self.in_submenu = false;
+        self.submenu_selected = 0;
+    }
+
+    /// Close the menu entirely.
+    pub fn close(&mut self) {
+        self.visible = false;
+        self.in_submenu = false;
+        self.selected = 0;
+        self.submenu_selected = 0;
     }
 }
 
@@ -540,8 +582,57 @@ impl App {
     }
 
     /// Move menu selection down.
-    pub fn menu_down(&mut self, menu_items_count: usize) {
-        self.menu.down(menu_items_count);
+    pub fn menu_down(&mut self, menu_items_count: usize, submenu_items_count: usize) {
+        self.menu.down(menu_items_count, submenu_items_count);
+    }
+
+    /// Get the currently selected menu item.
+    pub fn selected_menu_item(&self) -> Option<&MenuItem> {
+        App::menu_items().get(self.menu.selected)
+    }
+
+    /// Get the currently selected provider (when in provider submenu).
+    pub fn selected_provider(&self) -> Option<Provider> {
+        if self.menu.in_submenu {
+            Provider::all().get(self.menu.submenu_selected).copied()
+        } else {
+            None
+        }
+    }
+
+    /// Switch to a new provider.
+    pub fn switch_provider(&mut self, provider: Provider) {
+        self.llm.config.provider = provider;
+        self.llm.config.api_base = provider.default_api_base().to_string();
+        self.llm.config.model = provider.default_model().to_string();
+        
+        // Try to load API key from environment
+        let env_var = provider.env_var_name();
+        if !env_var.is_empty() {
+            if let Ok(key) = std::env::var(env_var) {
+                self.llm.config.api_key = key;
+            } else {
+                self.llm.config.api_key.clear();
+            }
+        } else {
+            // Provider doesn't need an API key (e.g., Ollama)
+            self.llm.config.api_key.clear();
+        }
+        
+        self.llm.apply_config();
+        self.menu.close();
+        
+        // Add a message about the provider switch
+        let status = if self.llm.config.is_configured() || !provider.requires_api_key() {
+            format!("Switched to {}. Ready to chat!", provider.display_name())
+        } else {
+            format!(
+                "Switched to {}. Set {} to connect.",
+                provider.display_name(),
+                provider.env_var_name()
+            )
+        };
+        self.chat.messages.push(Message::assistant(status));
     }
 
     /// Get the list of menu items.
