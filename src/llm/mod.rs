@@ -100,6 +100,71 @@ impl Provider {
     pub const fn uses_oauth(&self) -> bool {
         matches!(self, Provider::GitHubCopilot)
     }
+
+    /// Get the storage key used in AuthStorage.
+    ///
+    /// This key is used to store and retrieve credentials from `auth.json`.
+    pub const fn storage_key(&self) -> &'static str {
+        match self {
+            Provider::Anthropic => "anthropic",
+            Provider::Ollama => "ollama",
+            Provider::OpenRouter => "openrouter",
+            Provider::GitHubCopilot => "github_copilot",
+        }
+    }
+
+    /// Get the URL where users can create API keys for this provider.
+    ///
+    /// Returns `None` for providers that don't use API keys (e.g., Ollama, OAuth providers).
+    pub const fn api_key_url(&self) -> Option<&'static str> {
+        match self {
+            Provider::Anthropic => Some("https://console.anthropic.com/settings/keys"),
+            Provider::OpenRouter => Some("https://openrouter.ai/keys"),
+            Provider::Ollama => None,       // Local, no API key needed
+            Provider::GitHubCopilot => None, // Uses OAuth, not API keys
+        }
+    }
+
+    /// Validate the format of an API key for this provider.
+    ///
+    /// Returns `Ok(())` if the format is valid, or an error message describing the issue.
+    /// This only validates the format, not whether the key is actually valid.
+    pub fn validate_api_key_format(&self, key: &str) -> Result<(), &'static str> {
+        if key.is_empty() {
+            return Err("API key cannot be empty");
+        }
+
+        match self {
+            Provider::Anthropic => {
+                // Anthropic keys start with "sk-ant-"
+                if !key.starts_with("sk-ant-") {
+                    return Err("Anthropic keys must start with 'sk-ant-'");
+                }
+                if key.len() < 20 {
+                    return Err("API key is too short");
+                }
+                Ok(())
+            }
+            Provider::OpenRouter => {
+                // OpenRouter keys start with "sk-or-"
+                if !key.starts_with("sk-or-") {
+                    return Err("OpenRouter keys must start with 'sk-or-'");
+                }
+                if key.len() < 20 {
+                    return Err("API key is too short");
+                }
+                Ok(())
+            }
+            Provider::Ollama => {
+                // Ollama doesn't need an API key
+                Err("Ollama does not require an API key")
+            }
+            Provider::GitHubCopilot => {
+                // Copilot uses OAuth, not API keys
+                Err("GitHub Copilot uses OAuth, not API keys")
+            }
+        }
+    }
 }
 
 /// Chat message for API requests.
@@ -340,5 +405,82 @@ mod tests {
         assert_eq!(client.provider_type(), Provider::Ollama);
         // Ollama doesn't need an API key, so it's always configured
         assert!(client.is_configured());
+    }
+
+    #[test]
+    fn test_provider_storage_key() {
+        assert_eq!(Provider::Anthropic.storage_key(), "anthropic");
+        assert_eq!(Provider::OpenRouter.storage_key(), "openrouter");
+        assert_eq!(Provider::Ollama.storage_key(), "ollama");
+        assert_eq!(Provider::GitHubCopilot.storage_key(), "github_copilot");
+    }
+
+    #[test]
+    fn test_provider_api_key_url() {
+        // Anthropic and OpenRouter have API key URLs
+        assert!(Provider::Anthropic.api_key_url().is_some());
+        assert!(Provider::Anthropic
+            .api_key_url()
+            .unwrap()
+            .contains("anthropic"));
+        assert!(Provider::OpenRouter.api_key_url().is_some());
+        assert!(Provider::OpenRouter
+            .api_key_url()
+            .unwrap()
+            .contains("openrouter"));
+
+        // Ollama and Copilot don't use API keys
+        assert!(Provider::Ollama.api_key_url().is_none());
+        assert!(Provider::GitHubCopilot.api_key_url().is_none());
+    }
+
+    #[test]
+    fn test_provider_validate_api_key_format_anthropic() {
+        // Valid Anthropic key
+        assert!(Provider::Anthropic
+            .validate_api_key_format("sk-ant-api03-abcdefghijklmnopqrstuvwxyz")
+            .is_ok());
+
+        // Invalid: wrong prefix
+        assert!(Provider::Anthropic
+            .validate_api_key_format("sk-xyz-abcdefghijklmnopqrstuvwxyz")
+            .is_err());
+
+        // Invalid: empty
+        assert!(Provider::Anthropic.validate_api_key_format("").is_err());
+
+        // Invalid: too short
+        assert!(Provider::Anthropic
+            .validate_api_key_format("sk-ant-abc")
+            .is_err());
+    }
+
+    #[test]
+    fn test_provider_validate_api_key_format_openrouter() {
+        // Valid OpenRouter key
+        assert!(Provider::OpenRouter
+            .validate_api_key_format("sk-or-v1-abcdefghijklmnopqrstuvwxyz")
+            .is_ok());
+
+        // Invalid: wrong prefix
+        assert!(Provider::OpenRouter
+            .validate_api_key_format("sk-xyz-abcdefghijklmnopqrstuvwxyz")
+            .is_err());
+
+        // Invalid: empty
+        assert!(Provider::OpenRouter.validate_api_key_format("").is_err());
+    }
+
+    #[test]
+    fn test_provider_validate_api_key_format_no_key_providers() {
+        // Ollama doesn't need API keys
+        assert!(Provider::Ollama
+            .validate_api_key_format("anything")
+            .is_err());
+
+        // Copilot uses OAuth
+        assert!(Provider::GitHubCopilot
+            .validate_api_key_format("anything")
+            .is_err());
     }
 }
