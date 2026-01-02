@@ -73,7 +73,7 @@ impl Provider {
     pub fn default_api_base(&self) -> &'static str {
         match self {
             Provider::Anthropic => "https://api.anthropic.com/v1",
-            Provider::Ollama => "http://localhost:11434/api",
+            Provider::Ollama => "http://localhost:11434",
             Provider::OpenRouter => "https://openrouter.ai/api/v1",
             Provider::GitHubCopilot => "https://api.githubcopilot.com",
         }
