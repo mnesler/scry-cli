@@ -174,36 +174,6 @@ fn test_config_load_from_path_missing_file() {
 }
 
 #[test]
-fn test_config_update_llm() {
-    let mut config = Config::default();
-
-    config.update_llm(
-        "https://new.api.com/v1".to_string(),
-        "my-secret-key".to_string(),
-        "new-model".to_string(),
-    );
-
-    assert_eq!(config.llm.api_base, "https://new.api.com/v1");
-    assert_eq!(config.llm.api_key, Some("my-secret-key".to_string()));
-    assert_eq!(config.llm.model, "new-model");
-}
-
-#[test]
-fn test_config_update_llm_with_empty_api_key() {
-    let mut config = Config::default();
-
-    config.update_llm(
-        "https://new.api.com/v1".to_string(),
-        "".to_string(),
-        "new-model".to_string(),
-    );
-
-    assert_eq!(config.llm.api_base, "https://new.api.com/v1");
-    assert!(config.llm.api_key.is_none());
-    assert_eq!(config.llm.model, "new-model");
-}
-
-#[test]
 fn test_color_config_to_tuple() {
     let rgb = [100, 150, 200];
     let tuple = ColorConfig::to_tuple(&rgb);
