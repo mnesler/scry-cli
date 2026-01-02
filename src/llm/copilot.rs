@@ -199,7 +199,12 @@ impl CopilotProvider {
             }
         }
 
-        // Need to get a new token
+        // Try to load OAuth token from storage if not already present
+        if self.oauth_token.read().await.is_none() {
+            let _ = self.load_credentials().await;
+        }
+
+        // Get the OAuth token
         let oauth_token = self
             .oauth_token
             .read()
