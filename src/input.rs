@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{backend::Backend, Terminal};
 
-use crate::app::{App, MenuItem};
+use crate::app::{App, ConnectState, MenuItem};
 use crate::config::Config;
 use crate::llm::Provider;
 use crate::ui;
@@ -80,7 +80,7 @@ fn handle_key_event(
 ) -> HandleResult {
     let page_size = config.behavior.scroll_page_size;
 
-    // Global shortcuts (work in both menu and normal mode)
+    // Global shortcuts (work in all modes)
     match code {
         KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
             return HandleResult::Exit;
@@ -89,10 +89,18 @@ fn handle_key_event(
             return HandleResult::Exit;
         }
         KeyCode::Char('p') if modifiers.contains(KeyModifiers::CONTROL) => {
-            app.toggle_menu();
+            // Only toggle menu if not in connection dialog
+            if !app.connect.is_active() {
+                app.toggle_menu();
+            }
             return HandleResult::Continue;
         }
         _ => {}
+    }
+
+    // Handle connection dialog first (takes priority over menu)
+    if app.connect.is_active() {
+        return handle_connect_keys(app, code);
     }
 
     // Handle menu-specific or normal-mode keys
@@ -210,6 +218,203 @@ fn handle_normal_keys(app: &mut App, code: KeyCode, page_size: usize) -> HandleR
         }
         KeyCode::Esc => {
             return HandleResult::Exit;
+        }
+        _ => {}
+    }
+    HandleResult::Continue
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Connection dialog handlers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Handle key events when the connection dialog is active.
+fn handle_connect_keys(app: &mut App, code: KeyCode) -> HandleResult {
+    match &app.connect {
+        ConnectState::None => HandleResult::Continue,
+        ConnectState::ExistingCredential { selected, .. } => {
+            handle_existing_credential_keys(app, code, *selected)
+        }
+        ConnectState::SelectingMethod { selected, .. } => {
+            handle_selecting_method_keys(app, code, *selected)
+        }
+        ConnectState::EnteringApiKey { input, cursor, .. } => {
+            let input = input.clone();
+            let cursor = *cursor;
+            handle_entering_api_key_keys(app, code, &input, cursor)
+        }
+        ConnectState::ValidatingKey { .. } => {
+            // No input during validation, but allow Esc to cancel
+            if code == KeyCode::Esc {
+                app.cancel_connection();
+            }
+            HandleResult::Continue
+        }
+        ConnectState::OAuthPending { .. } | ConnectState::OAuthPolling { .. } => {
+            // OAuth states - Esc to cancel
+            if code == KeyCode::Esc {
+                app.cancel_connection();
+            }
+            HandleResult::Continue
+        }
+    }
+}
+
+/// Handle keys in ExistingCredential state.
+///
+/// Options: Use existing (0), Enter new (1), Cancel (2)
+fn handle_existing_credential_keys(app: &mut App, code: KeyCode, selected: usize) -> HandleResult {
+    const OPTION_COUNT: usize = 3;
+
+    match code {
+        KeyCode::Up => {
+            if let ConnectState::ExistingCredential { selected, .. } = &mut app.connect {
+                *selected = selected.saturating_sub(1);
+            }
+        }
+        KeyCode::Down => {
+            if let ConnectState::ExistingCredential { selected, .. } = &mut app.connect {
+                if *selected < OPTION_COUNT - 1 {
+                    *selected += 1;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            match selected {
+                0 => app.use_existing_credentials(),
+                1 => app.enter_new_credentials(),
+                2 | _ => app.cancel_connection(),
+            }
+        }
+        KeyCode::Esc => {
+            app.cancel_connection();
+        }
+        _ => {}
+    }
+    HandleResult::Continue
+}
+
+/// Handle keys in SelectingMethod state.
+///
+/// Options: Enter API Key (0), Create API Key (1), Cancel (2)
+fn handle_selecting_method_keys(app: &mut App, code: KeyCode, selected: usize) -> HandleResult {
+    const OPTION_COUNT: usize = 3;
+
+    match code {
+        KeyCode::Up => {
+            if let ConnectState::SelectingMethod { selected, .. } = &mut app.connect {
+                *selected = selected.saturating_sub(1);
+            }
+        }
+        KeyCode::Down => {
+            if let ConnectState::SelectingMethod { selected, .. } = &mut app.connect {
+                if *selected < OPTION_COUNT - 1 {
+                    *selected += 1;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            match selected {
+                0 => {
+                    // Enter API Key manually
+                    app.enter_new_credentials();
+                }
+                1 => {
+                    // Open browser to create API key
+                    if let ConnectState::SelectingMethod { provider, .. } = app.connect {
+                        if let Some(url) = provider.api_key_url() {
+                            if open::that(url).is_err() {
+                                app.toast_error("Could not open browser");
+                            }
+                        }
+                    }
+                }
+                2 | _ => {
+                    app.cancel_connection();
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.cancel_connection();
+        }
+        _ => {}
+    }
+    HandleResult::Continue
+}
+
+/// Handle keys in EnteringApiKey state.
+fn handle_entering_api_key_keys(
+    app: &mut App,
+    code: KeyCode,
+    input: &str,
+    _cursor: usize,
+) -> HandleResult {
+    match code {
+        KeyCode::Char(c) => {
+            if let ConnectState::EnteringApiKey {
+                input,
+                cursor,
+                error,
+                ..
+            } = &mut app.connect
+            {
+                input.insert(*cursor, c);
+                *cursor += 1;
+                // Clear error when user types
+                *error = None;
+            }
+        }
+        KeyCode::Backspace => {
+            if let ConnectState::EnteringApiKey {
+                input,
+                cursor,
+                error,
+                ..
+            } = &mut app.connect
+            {
+                if *cursor > 0 {
+                    input.remove(*cursor - 1);
+                    *cursor -= 1;
+                    *error = None;
+                }
+            }
+        }
+        KeyCode::Left => {
+            if let ConnectState::EnteringApiKey { cursor, .. } = &mut app.connect {
+                if *cursor > 0 {
+                    *cursor -= 1;
+                }
+            }
+        }
+        KeyCode::Right => {
+            if let ConnectState::EnteringApiKey { input, cursor, .. } = &mut app.connect {
+                if *cursor < input.len() {
+                    *cursor += 1;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            // Validate and submit
+            if !input.is_empty() {
+                if let ConnectState::EnteringApiKey { provider, input, .. } = &app.connect {
+                    let provider = *provider;
+                    let key = input.clone();
+
+                    // Check format first
+                    if let Err(e) = provider.validate_api_key_format(&key) {
+                        if let ConnectState::EnteringApiKey { error, .. } = &mut app.connect {
+                            *error = Some(e.to_string());
+                        }
+                    } else {
+                        // Format is valid - transition to validating state
+                        // The actual async validation will be handled elsewhere
+                        app.connect = ConnectState::ValidatingKey { provider, key };
+                    }
+                }
+            }
+        }
+        KeyCode::Esc => {
+            app.cancel_connection();
         }
         _ => {}
     }
