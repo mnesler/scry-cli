@@ -61,6 +61,12 @@ pub enum ConnectState {
         provider: Provider,
         auth_dialog: AuthDialog,
     },
+    /// User is selecting a model after OAuth authentication (Copilot only).
+    SelectingModel {
+        provider: Provider,
+        selected: usize,
+        oauth_token: OAuthToken,
+    },
 }
 
 impl Default for ConnectState {
@@ -84,7 +90,8 @@ impl ConnectState {
             | Self::EnteringApiKey { provider, .. }
             | Self::ValidatingKey { provider, .. }
             | Self::OAuthPending { provider, .. }
-            | Self::OAuthPolling { provider, .. } => Some(*provider),
+            | Self::OAuthPolling { provider, .. }
+            | Self::SelectingModel { provider, .. } => Some(*provider),
         }
     }
 }
@@ -1128,8 +1135,27 @@ impl App {
 
     /// Complete OAuth authentication.
     ///
-    /// Saves the token and switches to the provider.
+    /// For GitHub Copilot, transitions to model selection.
+    /// For other providers, saves the token and switches immediately.
     fn complete_oauth(&mut self, provider: Provider, token: OAuthToken) {
+        // For Copilot, transition to model selection
+        if provider == Provider::GitHubCopilot {
+            self.connect = ConnectState::SelectingModel {
+                provider,
+                selected: 0,
+                oauth_token: token,
+            };
+            return;
+        }
+
+        // For other providers, complete immediately
+        self.finish_oauth_connection(provider, token, provider.default_model());
+    }
+
+    /// Finish OAuth connection with the selected model.
+    ///
+    /// Saves credentials and switches to the provider.
+    fn finish_oauth_connection(&mut self, provider: Provider, token: OAuthToken, model: &str) {
         use crate::auth::{AuthStorage, Credential};
 
         // Save the OAuth credential
@@ -1147,12 +1173,26 @@ impl App {
         // Configure and switch to the provider
         self.llm.config.provider = provider;
         self.llm.config.api_base = provider.default_api_base().to_string();
-        self.llm.config.model = provider.default_model().to_string();
+        self.llm.config.model = model.to_string();
         self.llm.config.api_key = token.access_token;
         self.llm.apply_config();
         self.connect = ConnectState::None;
 
         self.toast_success(format!("Connected to {}", provider.display_name()));
+    }
+
+    /// Complete model selection for Copilot.
+    ///
+    /// Called when user selects a model from the model selection dialog.
+    pub fn complete_model_selection(&mut self, model: &str) {
+        if let ConnectState::SelectingModel {
+            provider,
+            oauth_token,
+            ..
+        } = std::mem::take(&mut self.connect)
+        {
+            self.finish_oauth_connection(provider, oauth_token, model);
+        }
     }
 
     /// Tick the OAuth auth dialog timer.
@@ -1527,5 +1567,67 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn test_connect_state_selecting_model() {
+        let token = OAuthToken {
+            access_token: "gho_test_token".to_string(),
+            token_type: "bearer".to_string(),
+            scope: Some("copilot".to_string()),
+            refresh_token: None,
+            expires_in: None,
+        };
+        let state = ConnectState::SelectingModel {
+            provider: Provider::GitHubCopilot,
+            selected: 2,
+            oauth_token: token,
+        };
+        assert!(state.is_active());
+        assert_eq!(state.provider(), Some(Provider::GitHubCopilot));
+    }
+
+    #[test]
+    fn test_complete_model_selection() {
+        let mut app = App::new_without_banner();
+        let token = OAuthToken {
+            access_token: "gho_test_token".to_string(),
+            token_type: "bearer".to_string(),
+            scope: Some("copilot".to_string()),
+            refresh_token: None,
+            expires_in: None,
+        };
+        app.connect = ConnectState::SelectingModel {
+            provider: Provider::GitHubCopilot,
+            selected: 0,
+            oauth_token: token,
+        };
+
+        app.complete_model_selection("claude-sonnet-4.5");
+
+        assert!(matches!(app.connect, ConnectState::None));
+        assert_eq!(app.llm.config.provider, Provider::GitHubCopilot);
+        assert_eq!(app.llm.config.model, "claude-sonnet-4.5");
+    }
+
+    #[test]
+    fn test_cancel_model_selection() {
+        let mut app = App::new_without_banner();
+        let token = OAuthToken {
+            access_token: "gho_test_token".to_string(),
+            token_type: "bearer".to_string(),
+            scope: Some("copilot".to_string()),
+            refresh_token: None,
+            expires_in: None,
+        };
+        app.connect = ConnectState::SelectingModel {
+            provider: Provider::GitHubCopilot,
+            selected: 1,
+            oauth_token: token,
+        };
+
+        app.cancel_connection();
+
+        assert!(matches!(app.connect, ConnectState::None));
     }
 }

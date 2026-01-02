@@ -8,6 +8,7 @@ use ratatui::{
 
 use crate::app::{App, ConnectState};
 use crate::config::Config;
+use crate::llm::COPILOT_MODELS;
 use crate::message::Role;
 
 use super::gradient::gradient_color;
@@ -248,6 +249,9 @@ pub fn render_connect_dialog(f: &mut Frame, app: &App) {
         | ConnectState::OAuthPolling { auth_dialog, .. } => {
             auth_dialog.render(f, f.size());
         }
+        ConnectState::SelectingModel { selected, .. } => {
+            render_model_selection_dialog(f, *selected);
+        }
     }
 }
 
@@ -478,4 +482,58 @@ fn render_validating_dialog(f: &mut Frame, provider_name: &str) {
         .style(Style::default().fg(Color::Gray))
         .wrap(Wrap { trim: true });
     f.render_widget(text, inner);
+}
+
+/// Render the model selection dialog for GitHub Copilot.
+fn render_model_selection_dialog(f: &mut Frame, selected: usize) {
+    let area = centered_rect(50, 50, f.size());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(" Select Model ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .style(Style::default().bg(Color::Black));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // Layout: models list, hints
+    let chunks = Layout::vertical([
+        Constraint::Min(3),    // Models
+        Constraint::Length(1), // Hints
+    ])
+    .split(inner);
+
+    // Model options
+    let lines: Vec<Line> = COPILOT_MODELS
+        .iter()
+        .enumerate()
+        .map(|(i, (display_name, _api_id))| {
+            let style = if i == selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            let prefix = if i == selected { "> " } else { "  " };
+            Line::from(Span::styled(format!("{}{}", prefix, display_name), style))
+        })
+        .collect();
+    let options_widget = Paragraph::new(lines);
+    f.render_widget(options_widget, chunks[0]);
+
+    // Hints
+    let hints = Line::from(vec![
+        Span::styled("[↑↓]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Navigate  "),
+        Span::styled("[Enter]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Select  "),
+        Span::styled("[Esc]", Style::default().fg(Color::Yellow)),
+        Span::raw(" Cancel"),
+    ]);
+    let hints_widget = Paragraph::new(hints).style(Style::default().fg(Color::Gray));
+    f.render_widget(hints_widget, chunks[1]);
 }

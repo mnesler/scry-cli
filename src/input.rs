@@ -6,7 +6,7 @@ use ratatui::{backend::Backend, Terminal};
 
 use crate::app::{App, ConnectState, MenuItem};
 use crate::config::Config;
-use crate::llm::Provider;
+use crate::llm::{Provider, COPILOT_MODELS};
 use crate::ui;
 use crate::ui::AuthDialogResult;
 
@@ -288,6 +288,9 @@ fn handle_connect_keys(app: &mut App, code: KeyCode) -> HandleResult {
             }
             HandleResult::Continue
         }
+        ConnectState::SelectingModel { selected, .. } => {
+            handle_model_selection_keys(app, code, *selected)
+        }
     }
 }
 
@@ -441,6 +444,37 @@ fn handle_entering_api_key_keys(
                         app.start_validation(provider, key);
                     }
                 }
+            }
+        }
+        KeyCode::Esc => {
+            app.cancel_connection();
+        }
+        _ => {}
+    }
+    HandleResult::Continue
+}
+
+/// Handle keys in SelectingModel state (model selection for Copilot).
+fn handle_model_selection_keys(app: &mut App, code: KeyCode, selected: usize) -> HandleResult {
+    let model_count = COPILOT_MODELS.len();
+
+    match code {
+        KeyCode::Up => {
+            if let ConnectState::SelectingModel { selected, .. } = &mut app.connect {
+                *selected = selected.saturating_sub(1);
+            }
+        }
+        KeyCode::Down => {
+            if let ConnectState::SelectingModel { selected, .. } = &mut app.connect {
+                if *selected < model_count - 1 {
+                    *selected += 1;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            // Get the API model ID for the selected model
+            if let Some((_display_name, api_id)) = COPILOT_MODELS.get(selected) {
+                app.complete_model_selection(api_id);
             }
         }
         KeyCode::Esc => {

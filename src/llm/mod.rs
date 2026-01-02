@@ -24,6 +24,19 @@ pub use copilot::CopilotProvider;
 pub use ollama::OllamaProvider;
 pub use openrouter::OpenRouterProvider;
 
+/// Available models for GitHub Copilot.
+///
+/// Each tuple contains (display_name, api_model_id).
+/// These are the Claude models and Raptor mini available through Copilot.
+pub const COPILOT_MODELS: &[(&str, &str)] = &[
+    ("Claude Sonnet 4.5", "claude-sonnet-4.5"),
+    ("Claude Sonnet 4", "claude-sonnet-4"),
+    ("Claude Haiku 4.5", "claude-haiku-4.5"),
+    ("Claude Opus 4.5", "claude-opus-4.5"),
+    ("Claude Opus 4.1", "claude-opus-4.1"),
+    ("Raptor mini", "raptor-mini"),
+];
+
 /// Supported LLM providers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -72,7 +85,7 @@ impl Provider {
             Provider::Anthropic => "claude-sonnet-4-5",
             Provider::Ollama => "llama3.2",
             Provider::OpenRouter => "anthropic/claude-sonnet-4-5",
-            Provider::GitHubCopilot => "gpt-4o",
+            Provider::GitHubCopilot => "claude-sonnet-4.5",
         }
     }
 
@@ -643,5 +656,25 @@ mod tests {
         let result = validate_api_key(Provider::Anthropic, "").await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("empty"));
+    }
+
+    #[test]
+    fn test_copilot_models_not_empty() {
+        assert!(!COPILOT_MODELS.is_empty());
+    }
+
+    #[test]
+    fn test_copilot_models_have_display_and_api_names() {
+        for (display_name, api_id) in COPILOT_MODELS {
+            assert!(!display_name.is_empty(), "Display name should not be empty");
+            assert!(!api_id.is_empty(), "API ID should not be empty");
+        }
+    }
+
+    #[test]
+    fn test_copilot_models_first_is_default() {
+        // First model should match the default
+        let (_, first_api_id) = COPILOT_MODELS[0];
+        assert_eq!(first_api_id, Provider::GitHubCopilot.default_model());
     }
 }
