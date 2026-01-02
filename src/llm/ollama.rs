@@ -238,20 +238,20 @@ mod tests {
             provider: Provider::Ollama,
             api_base: "http://localhost:11434".to_string(),
             api_key: String::new(),
-            model: "llama3.2".to_string(),
+            model: "qwen3:4b".to_string(),
             temperature: Some(0.7),
             max_tokens: None,
         };
         let provider = OllamaProvider::new(config);
         assert_eq!(provider.provider(), Provider::Ollama);
-        assert_eq!(provider.model(), "llama3.2");
+        assert_eq!(provider.model(), "qwen3:4b");
     }
 
     #[test]
     fn test_ollama_provider_with_defaults() {
         let provider = OllamaProvider::with_defaults();
         assert_eq!(provider.provider(), Provider::Ollama);
-        assert_eq!(provider.model(), "llama3.2");
+        assert_eq!(provider.model(), "qwen3:4b");
         assert!(provider.is_configured());
     }
 
@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn test_ollama_request_serialization() {
         let request = OllamaChatRequest {
-            model: "llama3.2".to_string(),
+            model: "qwen3:4b".to_string(),
             messages: vec![OllamaMessage {
                 role: "user".to_string(),
                 content: "Hello".to_string(),
@@ -311,7 +311,7 @@ mod tests {
             }),
         };
         let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("\"model\":\"llama3.2\""));
+        assert!(json.contains("\"model\":\"qwen3:4b\""));
         assert!(json.contains("\"stream\":true"));
         assert!(json.contains("\"temperature\":0.7"));
     }
@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn test_ollama_request_no_options() {
         let request = OllamaChatRequest {
-            model: "llama3.2".to_string(),
+            model: "qwen3:4b".to_string(),
             messages: vec![],
             stream: true,
             options: None,

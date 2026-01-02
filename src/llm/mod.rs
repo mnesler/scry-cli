@@ -83,7 +83,7 @@ impl Provider {
     pub fn default_model(&self) -> &'static str {
         match self {
             Provider::Anthropic => "claude-sonnet-4-5",
-            Provider::Ollama => "llama3.2",
+            Provider::Ollama => "qwen3:4b",
             Provider::OpenRouter => "anthropic/claude-sonnet-4-5",
             Provider::GitHubCopilot => "claude-sonnet-4.5",
         }
