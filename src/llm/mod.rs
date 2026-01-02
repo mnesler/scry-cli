@@ -3,8 +3,10 @@
 //! This module provides a unified interface for interacting with LLM providers.
 //! Currently supports:
 //! - Anthropic (Claude)
+//! - GitHub Copilot
 
 mod anthropic;
+mod copilot;
 mod provider;
 
 pub use provider::{LlmProvider, ProviderError, ProviderResult};
@@ -14,6 +16,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 pub use anthropic::AnthropicClient;
+pub use copilot::CopilotProvider;
 
 /// Supported LLM providers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -197,8 +200,20 @@ impl LlmClient {
     pub fn new(config: LlmConfig) -> Self {
         let provider: Arc<dyn LlmProvider> = match config.provider {
             Provider::Anthropic => Arc::new(AnthropicClient::new(config)),
-            // For now, other providers use a placeholder that returns an error
-            provider @ (Provider::Ollama | Provider::OpenRouter | Provider::GitHubCopilot) => {
+            Provider::GitHubCopilot => {
+                // Copilot provider - will load credentials on first use
+                let mut copilot = CopilotProvider::new();
+                copilot = copilot.with_model(config.model);
+                if let Some(temp) = config.temperature {
+                    copilot = copilot.with_temperature(temp);
+                }
+                if let Some(max) = config.max_tokens {
+                    copilot = copilot.with_max_tokens(max);
+                }
+                Arc::new(copilot)
+            }
+            // Other providers use a placeholder that returns an error
+            provider @ (Provider::Ollama | Provider::OpenRouter) => {
                 Arc::new(NotImplementedProvider::new(provider, config.model))
             }
         };
