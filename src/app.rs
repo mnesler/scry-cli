@@ -778,6 +778,146 @@ impl App {
     pub fn tick_toasts(&mut self) {
         self.toasts.tick()
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Connection flow methods
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// Start the connection flow for a provider.
+    ///
+    /// This checks for existing credentials and shows the appropriate dialog:
+    /// - If credentials exist: Show ExistingCredential dialog
+    /// - If OAuth provider (Copilot): Start OAuth device flow
+    /// - Otherwise: Show SelectingMethod dialog
+    pub fn start_connection(&mut self, provider: Provider) {
+        use crate::auth::AuthStorage;
+
+        // Close the menu first
+        self.menu.close();
+
+        // Check for existing credentials
+        if let Ok(storage) = AuthStorage::load() {
+            if let Some(cred) = storage.get(provider.storage_key()) {
+                if !cred.is_expired() {
+                    let masked = mask_api_key(cred.token());
+                    self.connect = ConnectState::ExistingCredential {
+                        provider,
+                        masked_key: masked,
+                        selected: 0,
+                    };
+                    return;
+                }
+            }
+        }
+
+        // No existing credentials - determine how to connect
+        if provider.uses_oauth() {
+            // OAuth providers (Copilot) - will be handled in a later issue
+            // For now, show a message
+            self.chat.messages.push(Message::assistant(
+                format!("{} uses OAuth authentication. This feature is coming soon.", provider.display_name())
+            ));
+        } else if !provider.requires_api_key() {
+            // Provider doesn't need auth (e.g., Ollama) - connect directly
+            self.complete_connection(provider, None);
+        } else {
+            // Show method selection dialog
+            self.connect = ConnectState::SelectingMethod {
+                provider,
+                selected: 0,
+            };
+        }
+    }
+
+    /// Cancel the connection flow and return to normal state.
+    pub fn cancel_connection(&mut self) {
+        self.connect = ConnectState::None;
+    }
+
+    /// Complete the connection successfully.
+    ///
+    /// Saves credentials (if provided) and switches to the provider.
+    pub fn complete_connection(&mut self, provider: Provider, api_key: Option<String>) {
+        use crate::auth::{AuthStorage, Credential};
+
+        // Save credential if provided
+        if let Some(key) = &api_key {
+            if let Ok(mut storage) = AuthStorage::load() {
+                storage.set(provider.storage_key(), Credential::api_key(key));
+                if let Err(e) = storage.save() {
+                    self.toast_warning(format!("Could not save credentials: {}", e));
+                }
+            }
+        }
+
+        // Configure and switch to the provider
+        self.llm.config.provider = provider;
+        self.llm.config.api_base = provider.default_api_base().to_string();
+        self.llm.config.model = provider.default_model().to_string();
+
+        if let Some(key) = api_key {
+            self.llm.config.api_key = key;
+        } else if !provider.requires_api_key() {
+            self.llm.config.api_key.clear();
+        }
+
+        self.llm.apply_config();
+        self.connect = ConnectState::None;
+
+        self.toast_success(format!("Connected to {}", provider.display_name()));
+    }
+
+    /// Handle a connection error.
+    ///
+    /// Shows the error in the EnteringApiKey state so the user can try again.
+    pub fn connection_error(&mut self, error: String) {
+        if let ConnectState::ValidatingKey { provider, key } = &self.connect {
+            self.connect = ConnectState::EnteringApiKey {
+                provider: *provider,
+                input: key.clone(),
+                cursor: key.len(),
+                error: Some(error),
+            };
+        } else {
+            // Fallback: show toast
+            self.toast_error(error);
+            self.connect = ConnectState::None;
+        }
+    }
+
+    /// Use existing credentials to connect.
+    pub fn use_existing_credentials(&mut self) {
+        use crate::auth::AuthStorage;
+
+        if let ConnectState::ExistingCredential { provider, .. } = self.connect {
+            if let Ok(storage) = AuthStorage::load() {
+                if let Some(cred) = storage.get(provider.storage_key()) {
+                    let key = cred.token().to_string();
+                    self.complete_connection(provider, Some(key));
+                    return;
+                }
+            }
+            // Fallback if credential disappeared
+            self.toast_error("Credential not found");
+            self.connect = ConnectState::None;
+        }
+    }
+
+    /// Enter new credentials (from ExistingCredential or SelectingMethod state).
+    pub fn enter_new_credentials(&mut self) {
+        let provider = match &self.connect {
+            ConnectState::ExistingCredential { provider, .. } => *provider,
+            ConnectState::SelectingMethod { provider, .. } => *provider,
+            _ => return,
+        };
+
+        self.connect = ConnectState::EnteringApiKey {
+            provider,
+            input: String::new(),
+            cursor: 0,
+            error: None,
+        };
+    }
 }
 
 impl Default for App {
@@ -859,5 +999,110 @@ mod tests {
         };
         let cloned = state.clone();
         assert!(matches!(cloned, ConnectState::ExistingCredential { .. }));
+    }
+
+    #[test]
+    fn test_start_connection_shows_dialog() {
+        let mut app = App::new_without_banner();
+        app.start_connection(Provider::Anthropic);
+
+        // Should go to either SelectingMethod or ExistingCredential
+        // depending on whether credentials already exist
+        assert!(
+            matches!(
+                app.connect,
+                ConnectState::SelectingMethod {
+                    provider: Provider::Anthropic,
+                    ..
+                }
+            ) || matches!(
+                app.connect,
+                ConnectState::ExistingCredential {
+                    provider: Provider::Anthropic,
+                    ..
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn test_start_connection_ollama() {
+        let mut app = App::new_without_banner();
+        app.start_connection(Provider::Ollama);
+
+        // Ollama doesn't need credentials, should complete immediately
+        assert!(matches!(app.connect, ConnectState::None));
+        assert_eq!(app.llm.config.provider, Provider::Ollama);
+    }
+
+    #[test]
+    fn test_cancel_connection() {
+        let mut app = App::new_without_banner();
+        app.connect = ConnectState::SelectingMethod {
+            provider: Provider::Anthropic,
+            selected: 0,
+        };
+
+        app.cancel_connection();
+        assert!(matches!(app.connect, ConnectState::None));
+    }
+
+    #[test]
+    fn test_enter_new_credentials() {
+        let mut app = App::new_without_banner();
+        app.connect = ConnectState::SelectingMethod {
+            provider: Provider::Anthropic,
+            selected: 0,
+        };
+
+        app.enter_new_credentials();
+
+        assert!(matches!(
+            app.connect,
+            ConnectState::EnteringApiKey {
+                provider: Provider::Anthropic,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_connection_error() {
+        let mut app = App::new_without_banner();
+        app.connect = ConnectState::ValidatingKey {
+            provider: Provider::Anthropic,
+            key: "sk-ant-test-key".to_string(),
+        };
+
+        app.connection_error("Invalid API key".to_string());
+
+        match &app.connect {
+            ConnectState::EnteringApiKey {
+                provider,
+                input,
+                error,
+                ..
+            } => {
+                assert_eq!(*provider, Provider::Anthropic);
+                assert_eq!(input, "sk-ant-test-key");
+                assert_eq!(error, &Some("Invalid API key".to_string()));
+            }
+            _ => panic!("Expected EnteringApiKey state"),
+        }
+    }
+
+    #[test]
+    fn test_complete_connection() {
+        let mut app = App::new_without_banner();
+        app.connect = ConnectState::ValidatingKey {
+            provider: Provider::Anthropic,
+            key: "sk-ant-test".to_string(),
+        };
+
+        app.complete_connection(Provider::Anthropic, Some("sk-ant-test".to_string()));
+
+        assert!(matches!(app.connect, ConnectState::None));
+        assert_eq!(app.llm.config.provider, Provider::Anthropic);
+        assert_eq!(app.llm.config.api_key, "sk-ant-test");
     }
 }
