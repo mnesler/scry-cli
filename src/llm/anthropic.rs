@@ -4,13 +4,14 @@
 //! See: https://docs.anthropic.com/en/api/messages-streaming
 
 use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-use super::{ChatMessage, LlmConfig, StreamEvent};
+use super::{ChatMessage, LlmConfig, LlmProvider, Provider, StreamEvent};
 
 /// Anthropic API version header value.
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -89,19 +90,28 @@ impl AnthropicClient {
         }
     }
 
-    /// Check if the client is configured with an API key.
-    pub fn is_configured(&self) -> bool {
-        self.config.is_configured()
+    /// Get a reference to the internal HTTP client (for testing).
+    #[cfg(test)]
+    pub fn http_client(&self) -> &Client {
+        &self.client
+    }
+}
+
+#[async_trait]
+impl LlmProvider for AnthropicClient {
+    fn provider(&self) -> Provider {
+        Provider::Anthropic
     }
 
-    /// Get the current model name.
-    pub fn model(&self) -> &str {
+    fn model(&self) -> &str {
         &self.config.model
     }
 
-    /// Send a streaming chat completion request.
-    /// Returns a channel receiver that yields StreamEvents.
-    pub fn stream_chat(&self, messages: Vec<ChatMessage>) -> mpsc::Receiver<StreamEvent> {
+    fn is_configured(&self) -> bool {
+        self.config.is_configured()
+    }
+
+    fn stream_chat(&self, messages: Vec<ChatMessage>) -> mpsc::Receiver<StreamEvent> {
         let (tx, rx) = mpsc::channel(100);
         let client = self.client.clone();
         let config = self.config.clone();
@@ -377,5 +387,19 @@ mod tests {
         config.model = "claude-opus-4".to_string();
         let client = AnthropicClient::new(config);
         assert_eq!(client.model(), "claude-opus-4");
+    }
+
+    #[test]
+    fn test_provider_type() {
+        let config = LlmConfig::default();
+        let client = AnthropicClient::new(config);
+        assert_eq!(client.provider(), Provider::Anthropic);
+    }
+
+    #[test]
+    fn test_display_name() {
+        let config = LlmConfig::default();
+        let client = AnthropicClient::new(config);
+        assert_eq!(client.display_name(), "Anthropic");
     }
 }
