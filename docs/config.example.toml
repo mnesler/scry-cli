@@ -16,6 +16,27 @@ miami_purple = [138, 43, 226]
 miami_cyan = [0, 255, 255]
 miami_orange = [255, 140, 0]
 
+[theme]
+# Menu colors
+menu_bg = [25, 25, 35]
+menu_shadow = [10, 10, 15]
+menu_selected_bg = [60, 60, 80]
+menu_selected_fg = [0, 255, 255]
+menu_unselected_fg = [140, 140, 160]
+menu_separator = [60, 60, 80]
+menu_border = [80, 80, 100]
+menu_input_bg = [50, 50, 60]
+
+# Status indicator colors
+status_ready = [100, 255, 100]
+status_streaming = [100, 200, 255]
+status_error = [255, 100, 100]
+status_not_configured = [255, 100, 100]
+
+# General UI colors
+bg_primary = [20, 20, 25]
+bg_secondary = [30, 30, 35]
+
 [behavior]
 # Number of messages to scroll with Page Up/Down
 scroll_page_size = 10
@@ -73,22 +94,10 @@ gradient_stops = ["ff0080", "00ffff", "8a2be2"]
 # Final reveal gradient colors
 final_gradient_stops = ["8a2be2", "00ffff", "ff0080"]
 
-# === Alternative Presets ===
-# Uncomment one of these blocks for different themes:
-
-# Cyberpunk Theme:
-# gradient_stops = ["ff00ff", "00ff00", "ffff00"]
-# final_gradient_stops = ["00ff00", "ff00ff", "00ffff"]
-
-# Ocean Theme:
-# gradient_stops = ["0077be", "00ced1", "20b2aa"]
-# final_gradient_stops = ["20b2aa", "00ced1", "0077be"]
-
-# Sunset Theme:
-# gradient_stops = ["ff4500", "ff6347", "ffd700"]
-# final_gradient_stops = ["ffd700", "ff6347", "ff4500"]
-
-# Monochrome (fast, subtle):
-# effect = "decrypt"
-# gradient_stops = ["ffffff", "888888", "ffffff"]
-# final_gradient_stops = ["00ff00", "00aa00", "00ff00"]
+[llm]
+# OpenAI-compatible API settings
+api_base = "https://api.openai.com/v1"
+# api_key = "sk-..."  # Or set OPENAI_API_KEY environment variable
+model = "gpt-4o-mini"
+temperature = 0.7
+max_tokens = 2048

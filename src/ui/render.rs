@@ -18,12 +18,13 @@ use super::text::{apply_miami_gradient_to_line, wrap_text};
 pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
     let colors = &config.colors;
     let behavior = &config.behavior;
+    let theme = &config.theme;
     let miami = colors.miami_colors();
     let (chat_start, chat_end) = colors.chat_gradient();
     let (input_start, input_end) = colors.input_gradient();
 
     let border_color = Color::Black;
-    let bg_color = Color::Rgb(20, 20, 25);
+    let bg_color = theme.bg_primary();
 
     // Fill entire background with border color to create thick border effect
     let background = Block::default()
@@ -51,35 +52,35 @@ pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
         .split(inner_area);
 
     // Update scroll state with total message count
-    let total_messages = app.messages.len();
+    let total_messages = app.chat.messages.len();
     app.update_scroll_state(total_messages);
 
     // Increment animation frame if banner animation is not complete
-    if !app.banner_animation_complete && !app.messages.is_empty() {
-        let banner_len = app.messages[0].content.len();
-        if app.banner_animation_frame < banner_len {
-            app.banner_animation_frame += behavior.animation_chars_per_frame;
+    if !app.animation.banner_complete && !app.chat.messages.is_empty() {
+        let banner_len = app.chat.messages[0].content.len();
+        if app.animation.banner_frame < banner_len {
+            app.animation.banner_frame += behavior.animation_chars_per_frame;
         } else {
-            app.banner_animation_complete = true;
+            app.animation.banner_complete = true;
         }
     }
 
     // Render chat messages (skip based on scroll offset)
-    let is_first_message = app.scroll_offset == 0;
     let messages: Vec<ListItem> = app
+        .chat
         .messages
         .iter()
         .enumerate()
-        .skip(app.scroll_offset)
-        .flat_map(|(msg_idx, msg)| {
-            let is_banner = msg_idx == 0 && is_first_message;
+        .skip(app.scroll.offset)
+        .flat_map(|(_msg_idx, msg)| {
+            let is_banner = msg.is_system_banner();
 
             // Apply Miami gradient to banner, regular colors to other messages
-            let message_content = if is_banner && !app.banner_animation_complete {
+            let message_content = if is_banner && !app.animation.banner_complete {
                 // Animated reveal: only show characters up to current frame
                 msg.content
                     .chars()
-                    .take(app.banner_animation_frame)
+                    .take(app.animation.banner_frame)
                     .collect::<String>()
             } else {
                 msg.content.clone()
@@ -127,11 +128,11 @@ pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
         .collect();
 
     // Status indicator for connection
-    let (status_text, status_color) = match &app.connection_status {
-        ConnectionStatus::NotConfigured => ("● No API Key", Color::Rgb(255, 100, 100)),
-        ConnectionStatus::Ready => ("● Ready", Color::Rgb(100, 255, 100)),
-        ConnectionStatus::Streaming => ("● Streaming...", Color::Rgb(100, 200, 255)),
-        ConnectionStatus::Error(_) => ("● Error", Color::Rgb(255, 100, 100)),
+    let (status_text, status_color) = match &app.llm.status {
+        ConnectionStatus::NotConfigured => ("● No API Key", theme.status_not_configured()),
+        ConnectionStatus::Ready => ("● Ready", theme.status_ready()),
+        ConnectionStatus::Streaming => ("● Streaming...", theme.status_streaming()),
+        ConnectionStatus::Error(_) => ("● Error", theme.status_error()),
     };
 
     // Purple to Blue gradient for chat area
@@ -148,7 +149,7 @@ pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
 
     // Render scrollbar with smooth Unicode characters and gradient
     let scroll_position = if total_messages > 0 {
-        app.scroll_offset as f32 / total_messages as f32
+        app.scroll.offset as f32 / total_messages as f32
     } else {
         0.0
     };
@@ -166,21 +167,21 @@ pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
             vertical: 1,
             horizontal: 0,
         }),
-        &mut app.scroll_state,
+        &mut app.scroll.scrollbar,
     );
 
     // Render input box with left border only, dark grey background, blinking cursor
-    let cursor_char = if app.cursor_visible { "▎" } else { " " };
+    let cursor_char = if app.animation.cursor_visible { "▎" } else { " " };
     
-    let input_text = if app.cursor_position < app.input.len() {
+    let input_text = if app.chat.cursor_position < app.chat.input.len() {
         Line::from(vec![
-            Span::raw(&app.input[..app.cursor_position]),
+            Span::raw(&app.chat.input[..app.chat.cursor_position]),
             Span::styled(cursor_char, Style::default().fg(Color::Cyan).add_modifier(Modifier::SLOW_BLINK)),
-            Span::raw(&app.input[app.cursor_position..]),
+            Span::raw(&app.chat.input[app.chat.cursor_position..]),
         ])
     } else {
         Line::from(vec![
-            Span::raw(&app.input),
+            Span::raw(&app.chat.input),
             Span::styled(cursor_char, Style::default().fg(Color::Cyan).add_modifier(Modifier::SLOW_BLINK)),
         ])
     };
@@ -189,7 +190,7 @@ pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
     let input_block = Block::default()
         .borders(Borders::LEFT)
         .border_style(Style::default().fg(gradient_color(input_start, input_end, 0.5)))
-        .style(Style::default().bg(Color::Rgb(30, 30, 35)));
+        .style(Style::default().bg(theme.bg_secondary()));
 
     let input = Paragraph::new(input_text)
         .style(Style::default().fg(Color::White))
@@ -199,7 +200,7 @@ pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
     f.render_widget(input, chunks[1]);
 
     // Render menu overlay if visible
-    if app.show_menu {
-        render_menu(f, app, &miami);
+    if app.menu.visible {
+        render_menu(f, app, &miami, config);
     }
 }

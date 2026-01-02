@@ -2,14 +2,6 @@
 //!
 //! Built with Rust, Ratatui, and Miami vibes.
 
-mod app;
-mod config;
-mod input;
-mod llm;
-mod message;
-mod ui;
-mod welcome;
-
 use std::io;
 
 use anyhow::Result;
@@ -19,8 +11,10 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-use app::App;
-use config::Config;
+use scry_cli::app::App;
+use scry_cli::config::Config;
+use scry_cli::input;
+use scry_cli::welcome;
 
 #[tokio::main]
 async fn main() -> Result<()> {

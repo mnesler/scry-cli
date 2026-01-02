@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{backend::Backend, Terminal};
 
-use crate::app::{App, InputMode};
+use crate::app::{App, InputMode, MenuItem};
 use crate::config::Config;
 use crate::ui;
 
@@ -41,7 +41,7 @@ pub fn run_app<B: Backend>(
         }
 
         // Use timeout for animation: fast polling during animation/streaming, slower when idle
-        let timeout = if !app.banner_animation_complete || app.is_streaming() {
+        let timeout = if !app.animation.banner_complete || app.is_streaming() {
             Duration::from_millis(behavior.animation_frame_ms)
         } else {
             // Use shorter timeout to keep cursor blinking smooth
@@ -53,7 +53,7 @@ pub fn run_app<B: Backend>(
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     // Reset cursor to visible on any keypress
-                    app.cursor_visible = true;
+                    app.animation.cursor_visible = true;
                     last_cursor_toggle = Instant::now();
                     
                     match handle_key_event(app, key.code, key.modifiers, config) {
@@ -92,7 +92,7 @@ fn handle_key_event(
     }
 
     // Handle menu-specific or normal-mode keys
-    if app.show_menu {
+    if app.menu.visible {
         handle_menu_keys(app, code)
     } else {
         handle_normal_keys(app, code, page_size)
@@ -133,41 +133,38 @@ fn handle_menu_keys(app: &mut App, code: KeyCode) -> HandleResult {
         KeyCode::Enter => {
             // Handle menu selection
             let menu_items = App::menu_items();
-            if let Some(selected) = menu_items.get(app.menu_selected) {
-                match *selected {
-                    "API Key" => {
+            if let Some(&selected) = menu_items.get(app.menu.selected) {
+                match selected {
+                    MenuItem::ApiKey => {
                         app.start_menu_input(InputMode::ApiKey);
                     }
-                    "API Base URL" => {
+                    MenuItem::ApiBase => {
                         app.start_menu_input(InputMode::ApiBase);
                     }
-                    "Model" => {
+                    MenuItem::Model => {
                         app.start_menu_input(InputMode::Model);
                     }
-                    "Save Config" => {
+                    MenuItem::SaveConfig => {
                         // Save config to file
                         if let Err(e) = app.save_config() {
-                            app.messages.push(crate::message::Message::assistant(
+                            app.chat.messages.push(crate::message::Message::assistant(
                                 format!("Failed to save config: {}", e)
                             ));
                         } else {
-                            app.messages.push(crate::message::Message::assistant(
+                            app.chat.messages.push(crate::message::Message::assistant(
                                 "Configuration saved successfully!".to_string()
                             ));
                         }
-                        app.show_menu = false;
+                        app.menu.visible = false;
                     }
-                    "Exit" => {
+                    MenuItem::Exit => {
                         return HandleResult::Exit;
-                    }
-                    _ => {
-                        app.show_menu = false;
                     }
                 }
             }
         }
         KeyCode::Esc => {
-            app.show_menu = false;
+            app.menu.visible = false;
         }
         _ => {}
     }

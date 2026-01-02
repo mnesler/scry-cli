@@ -9,6 +9,6 @@
 mod gradient;
 mod menu;
 mod render;
-mod text;
+pub mod text;
 
 pub use render::ui;

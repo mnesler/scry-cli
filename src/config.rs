@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// RGB color represented as a 3-element array.
 pub type Rgb = [u8; 3];
@@ -149,6 +149,71 @@ impl Default for WelcomeConfig {
     }
 }
 
+/// Theme configuration for UI elements.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ThemeConfig {
+    // Menu colors
+    /// Menu background color
+    pub menu_bg: Rgb,
+    /// Menu shadow color
+    pub menu_shadow: Rgb,
+    /// Selected menu item background
+    pub menu_selected_bg: Rgb,
+    /// Selected menu item foreground
+    pub menu_selected_fg: Rgb,
+    /// Unselected menu item foreground
+    pub menu_unselected_fg: Rgb,
+    /// Menu separator line color
+    pub menu_separator: Rgb,
+    /// Menu border color
+    pub menu_border: Rgb,
+    /// Menu input field background
+    pub menu_input_bg: Rgb,
+
+    // Status indicator colors
+    /// Status: Ready
+    pub status_ready: Rgb,
+    /// Status: Streaming
+    pub status_streaming: Rgb,
+    /// Status: Error
+    pub status_error: Rgb,
+    /// Status: Not configured
+    pub status_not_configured: Rgb,
+
+    // General UI colors
+    /// Main background color
+    pub bg_primary: Rgb,
+    /// Secondary background color
+    pub bg_secondary: Rgb,
+}
+
+impl Default for ThemeConfig {
+    fn default() -> Self {
+        Self {
+            // Menu colors
+            menu_bg: [25, 25, 35],
+            menu_shadow: [10, 10, 15],
+            menu_selected_bg: [60, 60, 80],
+            menu_selected_fg: [0, 255, 255],  // Cyan
+            menu_unselected_fg: [140, 140, 160],
+            menu_separator: [60, 60, 80],
+            menu_border: [80, 80, 100],
+            menu_input_bg: [50, 50, 60],
+
+            // Status colors
+            status_ready: [100, 255, 100],
+            status_streaming: [100, 200, 255],
+            status_error: [255, 100, 100],
+            status_not_configured: [255, 100, 100],
+
+            // General UI colors
+            bg_primary: [20, 20, 25],
+            bg_secondary: [30, 30, 35],
+        }
+    }
+}
+
 /// Main application configuration.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(default)]
@@ -157,6 +222,7 @@ pub struct Config {
     pub behavior: BehaviorConfig,
     pub welcome: WelcomeConfig,
     pub llm: LlmConfigFile,
+    pub theme: ThemeConfig,
 }
 
 impl Config {
@@ -173,7 +239,7 @@ impl Config {
     }
 
     /// Load configuration from a specific path.
-    pub fn load_from_path(path: &PathBuf) -> anyhow::Result<Self> {
+    pub fn load_from_path(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let contents = std::fs::read_to_string(path)?;
         let config: Config = toml::from_str(&contents)?;
         Ok(config)
@@ -189,7 +255,8 @@ impl Config {
     }
 
     /// Save configuration to a specific path.
-    pub fn save_to_path(&self, path: &PathBuf) -> anyhow::Result<()> {
+    pub fn save_to_path(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
+        let path = path.as_ref();
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -248,4 +315,82 @@ pub struct MiamiColors {
     pub purple: (u8, u8, u8),
     pub cyan: (u8, u8, u8),
     pub orange: (u8, u8, u8),
+}
+
+impl ThemeConfig {
+    /// Convert an RGB array to a ratatui Color.
+    pub fn to_color(rgb: &Rgb) -> ratatui::style::Color {
+        ratatui::style::Color::Rgb(rgb[0], rgb[1], rgb[2])
+    }
+
+    /// Get menu background color.
+    pub fn menu_bg(&self) -> ratatui::style::Color {
+        Self::to_color(&self.menu_bg)
+    }
+
+    /// Get menu shadow color.
+    pub fn menu_shadow(&self) -> ratatui::style::Color {
+        Self::to_color(&self.menu_shadow)
+    }
+
+    /// Get selected menu item background color.
+    pub fn menu_selected_bg(&self) -> ratatui::style::Color {
+        Self::to_color(&self.menu_selected_bg)
+    }
+
+    /// Get selected menu item foreground color.
+    #[allow(dead_code)]
+    pub fn menu_selected_fg(&self) -> ratatui::style::Color {
+        Self::to_color(&self.menu_selected_fg)
+    }
+
+    /// Get unselected menu item foreground color.
+    pub fn menu_unselected_fg(&self) -> ratatui::style::Color {
+        Self::to_color(&self.menu_unselected_fg)
+    }
+
+    /// Get menu separator color.
+    pub fn menu_separator(&self) -> ratatui::style::Color {
+        Self::to_color(&self.menu_separator)
+    }
+
+    /// Get menu border color.
+    pub fn menu_border(&self) -> ratatui::style::Color {
+        Self::to_color(&self.menu_border)
+    }
+
+    /// Get menu input background color.
+    pub fn menu_input_bg(&self) -> ratatui::style::Color {
+        Self::to_color(&self.menu_input_bg)
+    }
+
+    /// Get status ready color.
+    pub fn status_ready(&self) -> ratatui::style::Color {
+        Self::to_color(&self.status_ready)
+    }
+
+    /// Get status streaming color.
+    pub fn status_streaming(&self) -> ratatui::style::Color {
+        Self::to_color(&self.status_streaming)
+    }
+
+    /// Get status error color.
+    pub fn status_error(&self) -> ratatui::style::Color {
+        Self::to_color(&self.status_error)
+    }
+
+    /// Get status not configured color.
+    pub fn status_not_configured(&self) -> ratatui::style::Color {
+        Self::to_color(&self.status_not_configured)
+    }
+
+    /// Get primary background color.
+    pub fn bg_primary(&self) -> ratatui::style::Color {
+        Self::to_color(&self.bg_primary)
+    }
+
+    /// Get secondary background color.
+    pub fn bg_secondary(&self) -> ratatui::style::Color {
+        Self::to_color(&self.bg_secondary)
+    }
 }

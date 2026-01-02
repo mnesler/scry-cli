@@ -10,7 +10,7 @@ A beautiful terminal-based chat interface built with Rust and Ratatui, featuring
 - **Visual Scrollbar** - Gradient-colored scrollbar showing current position
 - **Miami-Style Menu** - Popup menu with hot pink/cyan/orange gradients (Ctrl+P to open)
 - **Interactive Input** - Full cursor support with backspace and arrow navigation
-- **Echo Bot** - Responds to your messages (easily replaceable with AI/API calls)
+- **LLM Integration** - OpenAI-compatible API support with streaming responses
 - **TOML Configuration** - Customize colors and behavior via config file
 
 ## Installation
@@ -118,7 +118,6 @@ scry-cli/
 │   ├── config.example.toml  # Example configuration
 │   ├── gradient_presets.md  # Color preset examples
 │   ├── SCROLLING.md         # Scrolling documentation
-│   ├── MENU.md              # Menu system documentation
 │   └── NOTES.md             # Development notes
 ├── Cargo.toml
 └── README.md
@@ -164,11 +163,9 @@ The beams effect creates an animated reveal of the welcome text with Miami-inspi
 
 - [ ] Syntax highlighting for code blocks
 - [ ] Message history persistence
-- [ ] AI integration (OpenAI, Anthropic, etc.)
 - [ ] Multi-agent workflow support
 - [ ] Themes and color schemes
 - [ ] Markdown rendering
-- [ ] Additional TTE effects (configurable)
 
 ## Contributing
 

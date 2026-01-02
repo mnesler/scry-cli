@@ -19,7 +19,7 @@ pub enum ConnectionStatus {
 }
 
 /// Input mode for the application.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     /// Normal chat input
     Chat,
@@ -31,40 +31,325 @@ pub enum InputMode {
     Model,
 }
 
-/// Application state for the chat CLI.
-pub struct App {
+/// Menu items available in the settings menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuItem {
+    ApiKey,
+    ApiBase,
+    Model,
+    SaveConfig,
+    Exit,
+}
+
+impl MenuItem {
+    /// Returns all menu items in display order.
+    pub const fn all() -> &'static [MenuItem] {
+        &[
+            MenuItem::ApiKey,
+            MenuItem::ApiBase,
+            MenuItem::Model,
+            MenuItem::SaveConfig,
+            MenuItem::Exit,
+        ]
+    }
+
+    /// Returns the display label for this menu item.
+    pub const fn label(&self) -> &'static str {
+        match self {
+            MenuItem::ApiKey => "API Key",
+            MenuItem::ApiBase => "API Base URL",
+            MenuItem::Model => "Model",
+            MenuItem::SaveConfig => "Save Config",
+            MenuItem::Exit => "Exit",
+        }
+    }
+
+    /// Returns true if this item is a configurable field.
+    pub const fn is_config_field(&self) -> bool {
+        matches!(self, MenuItem::ApiKey | MenuItem::ApiBase | MenuItem::Model)
+    }
+
+    /// Returns the corresponding InputMode for config fields.
+    pub const fn to_input_mode(&self) -> Option<InputMode> {
+        match self {
+            MenuItem::ApiKey => Some(InputMode::ApiKey),
+            MenuItem::ApiBase => Some(InputMode::ApiBase),
+            MenuItem::Model => Some(InputMode::Model),
+            _ => None,
+        }
+    }
+}
+
+/// Chat-related state: messages and input.
+#[derive(Debug, Default)]
+pub struct ChatState {
     /// Chat message history
     pub messages: Vec<Message>,
     /// Current input text
     pub input: String,
     /// Cursor position in input
     pub cursor_position: usize,
-    /// Cursor blink visibility state
-    pub cursor_visible: bool,
+}
+
+impl ChatState {
+    /// Create a new ChatState with initial messages.
+    pub fn new(messages: Vec<Message>) -> Self {
+        Self {
+            messages,
+            input: String::new(),
+            cursor_position: 0,
+        }
+    }
+
+    /// Handle a character input.
+    pub fn handle_char(&mut self, c: char) {
+        self.input.insert(self.cursor_position, c);
+        self.cursor_position += 1;
+    }
+
+    /// Handle backspace key.
+    pub fn handle_backspace(&mut self) {
+        if self.cursor_position > 0 {
+            self.input.remove(self.cursor_position - 1);
+            self.cursor_position -= 1;
+        }
+    }
+
+    /// Move cursor left.
+    pub fn move_cursor_left(&mut self) {
+        if self.cursor_position > 0 {
+            self.cursor_position -= 1;
+        }
+    }
+
+    /// Move cursor right.
+    pub fn move_cursor_right(&mut self) {
+        if self.cursor_position < self.input.len() {
+            self.cursor_position += 1;
+        }
+    }
+
+    /// Clear input and reset cursor.
+    pub fn clear_input(&mut self) {
+        self.input.clear();
+        self.cursor_position = 0;
+    }
+
+    /// Get max scroll offset based on message count.
+    pub fn max_scroll(&self) -> usize {
+        self.messages.len().saturating_sub(1)
+    }
+}
+
+/// Scroll-related state for the message list.
+#[derive(Debug, Default)]
+pub struct ScrollState {
     /// Current scroll offset in message list
-    pub scroll_offset: usize,
+    pub offset: usize,
     /// Scrollbar state for ratatui
-    pub scroll_state: ScrollbarState,
+    pub scrollbar: ScrollbarState,
+}
+
+impl ScrollState {
+    /// Scroll up one line.
+    pub fn scroll_up(&mut self) {
+        self.offset = self.offset.saturating_sub(1);
+    }
+
+    /// Scroll down one line.
+    pub fn scroll_down(&mut self, max_scroll: usize) {
+        if self.offset < max_scroll {
+            self.offset += 1;
+        }
+    }
+
+    /// Scroll up by page size.
+    pub fn scroll_page_up(&mut self, page_size: usize) {
+        self.offset = self.offset.saturating_sub(page_size);
+    }
+
+    /// Scroll down by page size.
+    pub fn scroll_page_down(&mut self, max_scroll: usize, page_size: usize) {
+        self.offset = (self.offset + page_size).min(max_scroll);
+    }
+
+    /// Scroll to top.
+    pub fn scroll_to_top(&mut self) {
+        self.offset = 0;
+    }
+
+    /// Scroll to bottom.
+    pub fn scroll_to_bottom(&mut self, max_scroll: usize) {
+        self.offset = max_scroll;
+    }
+
+    /// Update scrollbar state.
+    pub fn update(&mut self, total_items: usize) {
+        self.scrollbar = self.scrollbar.content_length(total_items);
+        self.scrollbar = self.scrollbar.position(self.offset);
+    }
+}
+
+/// Menu-related state for the settings overlay.
+#[derive(Debug, Default)]
+pub struct MenuState {
     /// Whether the menu overlay is visible
-    pub show_menu: bool,
+    pub visible: bool,
     /// Currently selected menu item index
-    pub menu_selected: usize,
-    /// Current frame of banner animation
-    pub banner_animation_frame: usize,
-    /// Whether banner animation has completed
-    pub banner_animation_complete: bool,
-    /// LLM client for API calls
-    pub llm_client: Option<LlmClient>,
-    /// Current connection status
-    pub connection_status: ConnectionStatus,
-    /// Receiver for streaming events
-    pub stream_rx: Option<mpsc::Receiver<StreamEvent>>,
-    /// Current input mode
+    pub selected: usize,
+    /// Current input mode (Chat or editing a field)
     pub input_mode: InputMode,
     /// Temporary input for menu fields
-    pub menu_input: String,
-    /// Current LLM configuration (mutable for menu editing)
-    pub llm_config: LlmConfig,
+    pub input: String,
+}
+
+impl MenuState {
+    /// Toggle menu visibility.
+    pub fn toggle(&mut self) {
+        self.visible = !self.visible;
+        if self.visible {
+            self.selected = 0;
+        }
+    }
+
+    /// Move menu selection up.
+    pub fn up(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+        }
+    }
+
+    /// Move menu selection down.
+    pub fn down(&mut self, menu_items_count: usize) {
+        if self.selected < menu_items_count - 1 {
+            self.selected += 1;
+        }
+    }
+
+    /// Check if in a menu input mode.
+    pub fn is_input_mode(&self) -> bool {
+        self.input_mode != InputMode::Chat
+    }
+
+    /// Handle character input for menu fields.
+    pub fn handle_char(&mut self, c: char) {
+        self.input.push(c);
+    }
+
+    /// Handle backspace for menu fields.
+    pub fn handle_backspace(&mut self) {
+        self.input.pop();
+    }
+
+    /// Cancel menu input.
+    pub fn cancel_input(&mut self) {
+        self.input.clear();
+        self.input_mode = InputMode::Chat;
+    }
+}
+
+impl Default for InputMode {
+    fn default() -> Self {
+        InputMode::Chat
+    }
+}
+
+/// Animation-related state for UI effects.
+#[derive(Debug)]
+pub struct AnimationState {
+    /// Cursor blink visibility state
+    pub cursor_visible: bool,
+    /// Current frame of banner animation
+    pub banner_frame: usize,
+    /// Whether banner animation has completed
+    pub banner_complete: bool,
+}
+
+impl Default for AnimationState {
+    fn default() -> Self {
+        Self {
+            cursor_visible: true,
+            banner_frame: 0,
+            banner_complete: false,
+        }
+    }
+}
+
+impl AnimationState {
+    /// Create a new AnimationState with banner animation complete.
+    pub fn no_banner() -> Self {
+        Self {
+            cursor_visible: true,
+            banner_frame: 0,
+            banner_complete: true,
+        }
+    }
+
+    /// Toggle cursor visibility for blinking effect.
+    pub fn toggle_cursor(&mut self) {
+        self.cursor_visible = !self.cursor_visible;
+    }
+}
+
+/// LLM-related state for API interactions.
+pub struct LlmState {
+    /// LLM client for API calls
+    pub client: Option<LlmClient>,
+    /// Current connection status
+    pub status: ConnectionStatus,
+    /// Receiver for streaming events
+    pub stream_rx: Option<mpsc::Receiver<StreamEvent>>,
+    /// Current LLM configuration
+    pub config: LlmConfig,
+}
+
+impl LlmState {
+    /// Create a new LlmState from config.
+    pub fn new(llm_config: LlmConfig) -> Self {
+        let is_configured = llm_config.is_configured();
+        let client = LlmClient::new(llm_config.clone());
+
+        Self {
+            client: Some(client),
+            status: if is_configured {
+                ConnectionStatus::Ready
+            } else {
+                ConnectionStatus::NotConfigured
+            },
+            stream_rx: None,
+            config: llm_config,
+        }
+    }
+
+    /// Check if currently streaming a response.
+    pub fn is_streaming(&self) -> bool {
+        self.stream_rx.is_some()
+    }
+
+    /// Apply the current config and recreate the client.
+    pub fn apply_config(&mut self) {
+        let is_configured = self.config.is_configured();
+        self.client = Some(LlmClient::new(self.config.clone()));
+        self.status = if is_configured {
+            ConnectionStatus::Ready
+        } else {
+            ConnectionStatus::NotConfigured
+        };
+    }
+}
+
+/// Application state for the chat CLI.
+pub struct App {
+    /// Chat state: messages, input, cursor
+    pub chat: ChatState,
+    /// Scroll state: offset and scrollbar
+    pub scroll: ScrollState,
+    /// Menu state: visibility, selection, input
+    pub menu: MenuState,
+    /// Animation state: cursor blink, banner animation
+    pub animation: AnimationState,
+    /// LLM state: client, config, status, streaming
+    pub llm: LlmState,
 }
 
 impl App {
@@ -77,30 +362,13 @@ impl App {
     pub fn new_with_config(config: &Config) -> Self {
         let banner = Self::get_banner();
         let llm_config = LlmConfig::from_env_and_config(Some(&config.llm));
-        let is_configured = llm_config.is_configured();
-        let llm_client = LlmClient::new(llm_config.clone());
 
         Self {
-            messages: vec![Message::assistant(banner)],
-            input: String::new(),
-            cursor_position: 0,
-            cursor_visible: true,
-            scroll_offset: 0,
-            scroll_state: ScrollbarState::default(),
-            show_menu: false,
-            menu_selected: 0,
-            banner_animation_frame: 0,
-            banner_animation_complete: false,
-            llm_client: Some(llm_client),
-            connection_status: if is_configured {
-                ConnectionStatus::Ready
-            } else {
-                ConnectionStatus::NotConfigured
-            },
-            stream_rx: None,
-            input_mode: InputMode::Chat,
-            menu_input: String::new(),
-            llm_config,
+            chat: ChatState::new(vec![Message::system_banner(banner)]),
+            scroll: ScrollState::default(),
+            menu: MenuState::default(),
+            animation: AnimationState::default(),
+            llm: LlmState::new(llm_config),
         }
     }
 
@@ -114,32 +382,15 @@ impl App {
     /// Create a new App instance without the welcome banner, from config.
     pub fn new_without_banner_with_config(config: &Config) -> Self {
         let llm_config = LlmConfig::from_env_and_config(Some(&config.llm));
-        let is_configured = llm_config.is_configured();
-        let llm_client = LlmClient::new(llm_config.clone());
 
         Self {
-            messages: vec![Message::assistant(
+            chat: ChatState::new(vec![Message::assistant(
                 "Welcome! Type a message and press Enter to chat. Press Ctrl+P for menu.".to_string(),
-            )],
-            input: String::new(),
-            cursor_position: 0,
-            cursor_visible: true,
-            scroll_offset: 0,
-            scroll_state: ScrollbarState::default(),
-            show_menu: false,
-            menu_selected: 0,
-            banner_animation_frame: 0,
-            banner_animation_complete: true, // No animation needed
-            llm_client: Some(llm_client),
-            connection_status: if is_configured {
-                ConnectionStatus::Ready
-            } else {
-                ConnectionStatus::NotConfigured
-            },
-            stream_rx: None,
-            input_mode: InputMode::Chat,
-            menu_input: String::new(),
-            llm_config,
+            )]),
+            scroll: ScrollState::default(),
+            menu: MenuState::default(),
+            animation: AnimationState::no_banner(),
+            llm: LlmState::new(llm_config),
         }
     }
 
@@ -147,16 +398,16 @@ impl App {
     pub fn save_config(&self) -> anyhow::Result<()> {
         let mut config = Config::load();
         config.update_llm(
-            self.llm_config.api_base.clone(),
-            self.llm_config.api_key.clone(),
-            self.llm_config.model.clone(),
+            self.llm.config.api_base.clone(),
+            self.llm.config.api_key.clone(),
+            self.llm.config.model.clone(),
         );
         config.save()
     }
 
     /// Toggle cursor visibility for blinking effect.
     pub fn toggle_cursor(&mut self) {
-        self.cursor_visible = !self.cursor_visible;
+        self.animation.toggle_cursor();
     }
 
     /// Get the welcome banner ASCII art.
@@ -201,21 +452,22 @@ impl App {
 
     /// Submit the current input as a message.
     pub fn submit_message(&mut self) {
-        if self.input.trim().is_empty() {
+        if self.chat.input.trim().is_empty() {
             return;
         }
 
         // Add user message
-        self.messages.push(Message::user(self.input.clone()));
+        self.chat.messages.push(Message::user(self.chat.input.clone()));
 
         // Check if LLM is configured
-        if let Some(client) = &self.llm_client {
+        if let Some(client) = &self.llm.client {
             if client.is_configured() {
-                // Convert message history to API format
+                // Convert message history to API format (skip system banners)
                 let api_messages: Vec<ChatMessage> = self
+                    .chat
                     .messages
                     .iter()
-                    .filter(|m| !m.content.contains("WELCOME TO")) // Skip banner
+                    .filter(|m| !m.is_system_banner())
                     .map(|m| ChatMessage {
                         role: match m.role {
                             Role::User => "user".to_string(),
@@ -226,55 +478,55 @@ impl App {
                     .collect();
 
                 // Start streaming
-                self.stream_rx = Some(client.stream_chat(api_messages));
-                self.connection_status = ConnectionStatus::Streaming;
+                self.llm.stream_rx = Some(client.stream_chat(api_messages));
+                self.llm.status = ConnectionStatus::Streaming;
                 
                 // Add empty assistant message that will be filled by streaming
-                self.messages.push(Message::assistant(String::new()));
+                self.chat.messages.push(Message::assistant(String::new()));
             } else {
                 // Not configured - show helpful message
-                self.messages.push(Message::assistant(
+                self.chat.messages.push(Message::assistant(
                     "No API key configured. Set OPENAI_API_KEY environment variable or use the menu to configure.".to_string()
                 ));
             }
         } else {
             // Fallback echo
-            self.messages
-                .push(Message::assistant(format!("You said: {}", self.input)));
+            self.chat
+                .messages
+                .push(Message::assistant(format!("You said: {}", self.chat.input)));
         }
 
         // Clear input
-        self.input.clear();
-        self.cursor_position = 0;
+        self.chat.clear_input();
     }
 
     /// Process streaming events. Call this in the event loop.
     pub fn process_stream(&mut self) {
-        if let Some(rx) = &mut self.stream_rx {
+        if let Some(rx) = &mut self.llm.stream_rx {
             // Try to receive without blocking
             match rx.try_recv() {
                 Ok(event) => match event {
                     StreamEvent::Token(token) => {
                         // Append token to the last message
-                        if let Some(last) = self.messages.last_mut() {
+                        if let Some(last) = self.chat.messages.last_mut() {
                             if last.role == Role::Assistant {
                                 last.content.push_str(&token);
                             }
                         }
                     }
                     StreamEvent::Done => {
-                        self.stream_rx = None;
-                        self.connection_status = ConnectionStatus::Ready;
+                        self.llm.stream_rx = None;
+                        self.llm.status = ConnectionStatus::Ready;
                     }
                     StreamEvent::Error(e) => {
                         // Append error to the last message or create new one
-                        if let Some(last) = self.messages.last_mut() {
+                        if let Some(last) = self.chat.messages.last_mut() {
                             if last.role == Role::Assistant && last.content.is_empty() {
                                 last.content = format!("Error: {}", e);
                             }
                         }
-                        self.stream_rx = None;
-                        self.connection_status = ConnectionStatus::Error(e);
+                        self.llm.stream_rx = None;
+                        self.llm.status = ConnectionStatus::Error(e);
                     }
                 },
                 Err(mpsc::error::TryRecvError::Empty) => {
@@ -282,9 +534,9 @@ impl App {
                 }
                 Err(mpsc::error::TryRecvError::Disconnected) => {
                     // Channel closed
-                    self.stream_rx = None;
-                    if self.connection_status == ConnectionStatus::Streaming {
-                        self.connection_status = ConnectionStatus::Ready;
+                    self.llm.stream_rx = None;
+                    if self.llm.status == ConnectionStatus::Streaming {
+                        self.llm.status = ConnectionStatus::Ready;
                     }
                 }
             }
@@ -293,175 +545,150 @@ impl App {
 
     /// Check if currently streaming a response.
     pub fn is_streaming(&self) -> bool {
-        self.stream_rx.is_some()
+        self.llm.is_streaming()
     }
 
     /// Handle a character input.
     pub fn handle_char(&mut self, c: char) {
-        self.input.insert(self.cursor_position, c);
-        self.cursor_position += 1;
+        self.chat.handle_char(c);
     }
 
     /// Handle backspace key.
     pub fn handle_backspace(&mut self) {
-        if self.cursor_position > 0 {
-            self.input.remove(self.cursor_position - 1);
-            self.cursor_position -= 1;
-        }
+        self.chat.handle_backspace();
     }
 
     /// Move cursor left.
     pub fn move_cursor_left(&mut self) {
-        if self.cursor_position > 0 {
-            self.cursor_position -= 1;
-        }
+        self.chat.move_cursor_left();
     }
 
     /// Move cursor right.
     pub fn move_cursor_right(&mut self) {
-        if self.cursor_position < self.input.len() {
-            self.cursor_position += 1;
-        }
+        self.chat.move_cursor_right();
     }
 
     /// Scroll up one line.
     pub fn scroll_up(&mut self) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(1);
+        self.scroll.scroll_up();
     }
 
     /// Scroll down one line.
     pub fn scroll_down(&mut self, max_scroll: usize) {
-        if self.scroll_offset < max_scroll {
-            self.scroll_offset += 1;
-        }
+        self.scroll.scroll_down(max_scroll);
     }
 
     /// Scroll up by page size.
     pub fn scroll_page_up(&mut self, page_size: usize) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(page_size);
+        self.scroll.scroll_page_up(page_size);
     }
 
     /// Scroll down by page size.
     pub fn scroll_page_down(&mut self, max_scroll: usize, page_size: usize) {
-        self.scroll_offset = (self.scroll_offset + page_size).min(max_scroll);
+        self.scroll.scroll_page_down(max_scroll, page_size);
     }
 
     /// Scroll to top.
     pub fn scroll_to_top(&mut self) {
-        self.scroll_offset = 0;
+        self.scroll.scroll_to_top();
     }
 
     /// Scroll to bottom.
     pub fn scroll_to_bottom(&mut self, max_scroll: usize) {
-        self.scroll_offset = max_scroll;
+        self.scroll.scroll_to_bottom(max_scroll);
     }
 
     /// Update scrollbar state.
     pub fn update_scroll_state(&mut self, total_items: usize) {
-        self.scroll_state = self.scroll_state.content_length(total_items);
-        self.scroll_state = self.scroll_state.position(self.scroll_offset);
+        self.scroll.update(total_items);
     }
 
     /// Toggle menu visibility.
     pub fn toggle_menu(&mut self) {
-        self.show_menu = !self.show_menu;
-        if self.show_menu {
-            self.menu_selected = 0;
-        }
+        self.menu.toggle();
     }
 
     /// Move menu selection up.
     pub fn menu_up(&mut self) {
-        if self.menu_selected > 0 {
-            self.menu_selected -= 1;
-        }
+        self.menu.up();
     }
 
     /// Move menu selection down.
     pub fn menu_down(&mut self, menu_items_count: usize) {
-        if self.menu_selected < menu_items_count - 1 {
-            self.menu_selected += 1;
-        }
+        self.menu.down(menu_items_count);
     }
 
     /// Get the list of menu items.
-    pub fn menu_items() -> Vec<&'static str> {
-        vec!["API Key", "API Base URL", "Model", "Save Config", "Exit"]
+    pub fn menu_items() -> &'static [MenuItem] {
+        MenuItem::all()
     }
 
     /// Apply the current LLM config and recreate the client.
     pub fn apply_llm_config(&mut self) {
-        let is_configured = self.llm_config.is_configured();
-        self.llm_client = Some(LlmClient::new(self.llm_config.clone()));
-        self.connection_status = if is_configured {
-            ConnectionStatus::Ready
-        } else {
-            ConnectionStatus::NotConfigured
-        };
+        self.llm.apply_config();
     }
 
     /// Start editing a menu field.
     pub fn start_menu_input(&mut self, mode: InputMode) {
-        self.input_mode = mode.clone();
+        self.menu.input_mode = mode;
         // Pre-fill with current value
-        self.menu_input = match mode {
-            InputMode::ApiKey => self.llm_config.api_key.clone(),
-            InputMode::ApiBase => self.llm_config.api_base.clone(),
-            InputMode::Model => self.llm_config.model.clone(),
+        self.menu.input = match mode {
+            InputMode::ApiKey => self.llm.config.api_key.clone(),
+            InputMode::ApiBase => self.llm.config.api_base.clone(),
+            InputMode::Model => self.llm.config.model.clone(),
             InputMode::Chat => String::new(),
         };
     }
 
     /// Confirm menu input and apply the value.
     pub fn confirm_menu_input(&mut self) {
-        match self.input_mode {
+        match self.menu.input_mode {
             InputMode::ApiKey => {
-                self.llm_config.api_key = self.menu_input.clone();
+                self.llm.config.api_key = self.menu.input.clone();
                 self.apply_llm_config();
             }
             InputMode::ApiBase => {
-                self.llm_config.api_base = self.menu_input.clone();
+                self.llm.config.api_base = self.menu.input.clone();
                 self.apply_llm_config();
             }
             InputMode::Model => {
-                self.llm_config.model = self.menu_input.clone();
+                self.llm.config.model = self.menu.input.clone();
                 self.apply_llm_config();
             }
             InputMode::Chat => {}
         }
-        self.menu_input.clear();
-        self.input_mode = InputMode::Chat;
+        self.menu.input.clear();
+        self.menu.input_mode = InputMode::Chat;
     }
 
     /// Cancel menu input.
     pub fn cancel_menu_input(&mut self) {
-        self.menu_input.clear();
-        self.input_mode = InputMode::Chat;
+        self.menu.cancel_input();
     }
 
     /// Handle character input for menu fields.
     pub fn handle_menu_char(&mut self, c: char) {
-        self.menu_input.push(c);
+        self.menu.handle_char(c);
     }
 
     /// Handle backspace for menu fields.
     pub fn handle_menu_backspace(&mut self) {
-        self.menu_input.pop();
+        self.menu.handle_backspace();
     }
 
     /// Check if in a menu input mode.
     pub fn is_menu_input_mode(&self) -> bool {
-        self.input_mode != InputMode::Chat
+        self.menu.is_input_mode()
     }
 
     /// Get display value for a config field (masked for API key).
-    pub fn get_config_display(&self, field: &str) -> String {
-        match field {
-            "API Key" => {
-                if self.llm_config.api_key.is_empty() {
+    pub fn get_config_display(&self, item: MenuItem) -> String {
+        match item {
+            MenuItem::ApiKey => {
+                if self.llm.config.api_key.is_empty() {
                     "(not set)".to_string()
                 } else {
-                    let key = &self.llm_config.api_key;
+                    let key = &self.llm.config.api_key;
                     if key.len() > 8 {
                         format!("{}...{}", &key[..4], &key[key.len()-4..])
                     } else {
@@ -469,15 +696,15 @@ impl App {
                     }
                 }
             }
-            "API Base URL" => self.llm_config.api_base.clone(),
-            "Model" => self.llm_config.model.clone(),
+            MenuItem::ApiBase => self.llm.config.api_base.clone(),
+            MenuItem::Model => self.llm.config.model.clone(),
             _ => String::new(),
         }
     }
 
     /// Get max scroll offset based on message count.
     pub fn max_scroll(&self) -> usize {
-        self.messages.len().saturating_sub(1)
+        self.chat.max_scroll()
     }
 }
 
