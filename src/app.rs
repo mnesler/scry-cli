@@ -4,6 +4,7 @@ use tokio::sync::mpsc;
 use crate::config::Config;
 use crate::llm::{ChatMessage, LlmClient, LlmConfig, Provider, StreamEvent};
 use crate::message::{Message, Role};
+use crate::ui::{ToastLevel, ToastState};
 
 /// Connection status for the LLM.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -329,6 +330,8 @@ pub struct App {
     pub animation: AnimationState,
     /// LLM state: client, config, status, streaming
     pub llm: LlmState,
+    /// Toast notification state
+    pub toasts: ToastState,
 }
 
 impl App {
@@ -348,6 +351,7 @@ impl App {
             menu: MenuState::default(),
             animation: AnimationState::default(),
             llm: LlmState::new(llm_config),
+            toasts: ToastState::default(),
         }
     }
 
@@ -370,6 +374,7 @@ impl App {
             menu: MenuState::default(),
             animation: AnimationState::no_banner(),
             llm: LlmState::new(llm_config),
+            toasts: ToastState::default(),
         }
     }
 
@@ -643,6 +648,46 @@ impl App {
     /// Get max scroll offset based on message count.
     pub fn max_scroll(&self) -> usize {
         self.chat.max_scroll()
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Toast notification methods
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// Add a toast notification.
+    pub fn toast(&mut self, message: impl Into<String>, level: ToastLevel) -> u64 {
+        self.toasts.push(message, level)
+    }
+
+    /// Add an info toast.
+    pub fn toast_info(&mut self, message: impl Into<String>) -> u64 {
+        self.toasts.info(message)
+    }
+
+    /// Add a success toast.
+    pub fn toast_success(&mut self, message: impl Into<String>) -> u64 {
+        self.toasts.success(message)
+    }
+
+    /// Add a warning toast.
+    pub fn toast_warning(&mut self, message: impl Into<String>) -> u64 {
+        self.toasts.warning(message)
+    }
+
+    /// Add an error toast.
+    pub fn toast_error(&mut self, message: impl Into<String>) -> u64 {
+        self.toasts.error(message)
+    }
+
+    /// Dismiss a toast by ID.
+    pub fn dismiss_toast(&mut self, id: u64) {
+        self.toasts.dismiss(id)
+    }
+
+    /// Tick the toast system to remove expired toasts.
+    /// Call this on each frame/tick.
+    pub fn tick_toasts(&mut self) {
+        self.toasts.tick()
     }
 }
 

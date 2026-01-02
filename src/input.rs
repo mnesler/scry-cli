@@ -33,6 +33,9 @@ pub fn run_app<B: Backend>(
         // Process any streaming events first
         app.process_stream();
         
+        // Tick toast notifications to expire old ones
+        app.tick_toasts();
+        
         terminal.draw(|f| ui::ui(f, app, config))?;
 
         // Toggle cursor blink

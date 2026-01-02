@@ -5,6 +5,7 @@
 //! - Menu overlay
 //! - Modal dialogs
 //! - Auth dialogs for OAuth
+//! - Toast notifications
 //! - Gradient utilities
 //! - Text processing
 
@@ -14,7 +15,9 @@ mod gradient;
 mod menu;
 mod render;
 pub mod text;
+mod toast;
 
 pub use auth_dialog::{AuthDialog, AuthDialogResult, AuthDialogState};
 pub use dialog::{Dialog, DialogAction, DialogContent, DialogResult, DialogState};
 pub use render::ui;
+pub use toast::{render_toasts, Toast, ToastLevel, ToastState};

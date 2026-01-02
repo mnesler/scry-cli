@@ -13,6 +13,7 @@ use crate::message::Role;
 use super::gradient::gradient_color;
 use super::menu::render_menu;
 use super::text::{apply_miami_gradient_to_line, wrap_text};
+use super::toast::render_toasts;
 
 /// Main UI rendering function.
 pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
@@ -193,4 +194,7 @@ pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
     if app.menu.visible {
         render_menu(f, app, &miami, config);
     }
+
+    // Render toast notifications (above main content, but below dialogs)
+    render_toasts(f, &app.toasts);
 }
