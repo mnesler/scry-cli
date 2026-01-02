@@ -909,12 +909,46 @@ impl App {
 
     /// Use existing credentials to connect.
     pub fn use_existing_credentials(&mut self) {
-        use crate::auth::AuthStorage;
+        use crate::auth::{AuthStorage, OAuthToken};
 
         if let ConnectState::ExistingCredential { provider, .. } = self.connect {
             if let Ok(storage) = AuthStorage::load() {
                 if let Some(cred) = storage.get(provider.storage_key()) {
                     let key = cred.token().to_string();
+                    
+                    // Special handling for Copilot
+                    if provider == Provider::GitHubCopilot {
+                        // If model is saved, connect directly with it
+                        if let Some(model) = cred.model() {
+                            self.llm.config.provider = provider;
+                            self.llm.config.api_base = provider.default_api_base().to_string();
+                            self.llm.config.model = model.to_string();
+                            self.llm.config.api_key = key;
+                            self.llm.apply_config();
+                            self.connect = ConnectState::None;
+                            self.toast_success(format!("Connected to {} with {}", 
+                                provider.display_name(), model));
+                            return;
+                        }
+                        
+                        // No saved model - show model selection dialog
+                        let oauth_token = OAuthToken {
+                            access_token: key,
+                            token_type: "bearer".to_string(),
+                            scope: Some("read:user".to_string()),
+                            expires_in: None,
+                            refresh_token: cred.refresh_token().map(|s| s.to_string()),
+                        };
+                        
+                        self.connect = ConnectState::SelectingModel {
+                            provider,
+                            selected: 0,
+                            oauth_token,
+                        };
+                        return;
+                    }
+                    
+                    // For other providers, connect directly
                     self.complete_connection(provider, Some(key));
                     return;
                 }
@@ -922,6 +956,37 @@ impl App {
             // Fallback if credential disappeared
             self.toast_error("Credential not found");
             self.connect = ConnectState::None;
+        }
+    }
+
+    /// Change the model for an existing Copilot connection.
+    pub fn change_copilot_model(&mut self) {
+        use crate::auth::{AuthStorage, OAuthToken};
+
+        if let ConnectState::ExistingCredential { provider, .. } = self.connect {
+            if provider != Provider::GitHubCopilot {
+                return;
+            }
+
+            if let Ok(storage) = AuthStorage::load() {
+                if let Some(cred) = storage.get(provider.storage_key()) {
+                    // Convert credential to OAuthToken
+                    let oauth_token = OAuthToken {
+                        access_token: cred.token().to_string(),
+                        token_type: "bearer".to_string(),
+                        scope: Some("read:user".to_string()),
+                        expires_in: None,
+                        refresh_token: cred.refresh_token().map(|s| s.to_string()),
+                    };
+
+                    // Transition to model selection
+                    self.connect = ConnectState::SelectingModel {
+                        provider,
+                        selected: 0,
+                        oauth_token,
+                    };
+                }
+            }
         }
     }
 
