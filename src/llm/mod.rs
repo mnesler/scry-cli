@@ -5,10 +5,12 @@
 //! - Anthropic (Claude)
 //! - GitHub Copilot
 //! - Ollama (local models)
+//! - OpenRouter (multi-model access)
 
 mod anthropic;
 mod copilot;
 mod ollama;
+mod openrouter;
 mod provider;
 
 pub use provider::{LlmProvider, ProviderError, ProviderResult};
@@ -20,6 +22,7 @@ use tokio::sync::mpsc;
 pub use anthropic::AnthropicClient;
 pub use copilot::CopilotProvider;
 pub use ollama::OllamaProvider;
+pub use openrouter::OpenRouterProvider;
 
 /// Supported LLM providers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -216,10 +219,7 @@ impl LlmClient {
                 Arc::new(copilot)
             }
             Provider::Ollama => Arc::new(OllamaProvider::new(config)),
-            // OpenRouter uses a placeholder that returns an error
-            Provider::OpenRouter => {
-                Arc::new(NotImplementedProvider::new(Provider::OpenRouter, config.model))
-            }
+            Provider::OpenRouter => Arc::new(OpenRouterProvider::new(config)),
         };
 
         Self { inner: provider }
@@ -262,50 +262,6 @@ impl LlmClient {
     /// Returns a channel receiver that yields StreamEvents.
     pub fn stream_chat(&self, messages: Vec<ChatMessage>) -> mpsc::Receiver<StreamEvent> {
         self.inner.stream_chat(messages)
-    }
-}
-
-/// Placeholder provider for not-yet-implemented providers.
-struct NotImplementedProvider {
-    provider_type: Provider,
-    model: String,
-}
-
-impl NotImplementedProvider {
-    fn new(provider: Provider, model: String) -> Self {
-        Self {
-            provider_type: provider,
-            model,
-        }
-    }
-}
-
-impl LlmProvider for NotImplementedProvider {
-    fn provider(&self) -> Provider {
-        self.provider_type
-    }
-
-    fn model(&self) -> &str {
-        &self.model
-    }
-
-    fn is_configured(&self) -> bool {
-        // Not implemented providers are never configured
-        false
-    }
-
-    fn stream_chat(&self, _messages: Vec<ChatMessage>) -> mpsc::Receiver<StreamEvent> {
-        let (tx, rx) = mpsc::channel(1);
-        let provider_name = self.provider_type.display_name().to_string();
-        tokio::spawn(async move {
-            let _ = tx
-                .send(StreamEvent::Error(format!(
-                    "{} provider is not yet implemented. Coming soon!",
-                    provider_name
-                )))
-                .await;
-        });
-        rx
     }
 }
 
@@ -353,12 +309,25 @@ mod tests {
     }
 
     #[test]
-    fn test_not_implemented_provider() {
+    fn test_openrouter_provider() {
         let mut config = LlmConfig::default();
         config.provider = Provider::OpenRouter;
+        config.api_base = Provider::OpenRouter.default_api_base().to_string();
+        config.model = Provider::OpenRouter.default_model().to_string();
         let client = LlmClient::new(config);
         assert_eq!(client.provider_type(), Provider::OpenRouter);
+        // OpenRouter requires an API key, so it's not configured without one
         assert!(!client.is_configured());
+    }
+
+    #[test]
+    fn test_openrouter_provider_configured() {
+        let mut config = LlmConfig::default();
+        config.provider = Provider::OpenRouter;
+        config.api_key = "test-key".to_string();
+        let client = LlmClient::new(config);
+        assert_eq!(client.provider_type(), Provider::OpenRouter);
+        assert!(client.is_configured());
     }
 
     #[test]
