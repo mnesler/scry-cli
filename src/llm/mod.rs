@@ -4,9 +4,11 @@
 //! Currently supports:
 //! - Anthropic (Claude)
 //! - GitHub Copilot
+//! - Ollama (local models)
 
 mod anthropic;
 mod copilot;
+mod ollama;
 mod provider;
 
 pub use provider::{LlmProvider, ProviderError, ProviderResult};
@@ -17,6 +19,7 @@ use tokio::sync::mpsc;
 
 pub use anthropic::AnthropicClient;
 pub use copilot::CopilotProvider;
+pub use ollama::OllamaProvider;
 
 /// Supported LLM providers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -212,9 +215,10 @@ impl LlmClient {
                 }
                 Arc::new(copilot)
             }
-            // Other providers use a placeholder that returns an error
-            provider @ (Provider::Ollama | Provider::OpenRouter) => {
-                Arc::new(NotImplementedProvider::new(provider, config.model))
+            Provider::Ollama => Arc::new(OllamaProvider::new(config)),
+            // OpenRouter uses a placeholder that returns an error
+            Provider::OpenRouter => {
+                Arc::new(NotImplementedProvider::new(Provider::OpenRouter, config.model))
             }
         };
 
@@ -351,9 +355,21 @@ mod tests {
     #[test]
     fn test_not_implemented_provider() {
         let mut config = LlmConfig::default();
+        config.provider = Provider::OpenRouter;
+        let client = LlmClient::new(config);
+        assert_eq!(client.provider_type(), Provider::OpenRouter);
+        assert!(!client.is_configured());
+    }
+
+    #[test]
+    fn test_ollama_provider() {
+        let mut config = LlmConfig::default();
         config.provider = Provider::Ollama;
+        config.api_base = Provider::Ollama.default_api_base().to_string();
+        config.model = Provider::Ollama.default_model().to_string();
         let client = LlmClient::new(config);
         assert_eq!(client.provider_type(), Provider::Ollama);
-        assert!(!client.is_configured());
+        // Ollama doesn't need an API key, so it's always configured
+        assert!(client.is_configured());
     }
 }
