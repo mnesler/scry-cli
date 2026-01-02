@@ -1359,4 +1359,173 @@ mod tests {
         assert_eq!(app.llm.config.provider, Provider::Anthropic);
         assert_eq!(app.llm.config.api_key, "sk-ant-test");
     }
+
+    #[test]
+    fn test_cancel_connection_clears_receivers() {
+        let mut app = App::new_without_banner();
+        app.connect = ConnectState::SelectingMethod {
+            provider: Provider::Anthropic,
+            selected: 0,
+        };
+        // Simulate that we have pending receivers
+        let (_tx1, rx1) = tokio::sync::oneshot::channel::<Result<OAuthToken, String>>();
+        let (_tx2, rx2) = tokio::sync::oneshot::channel::<Result<DeviceCode, String>>();
+        app.oauth_rx = Some(rx1);
+        app.device_code_rx = Some(rx2);
+
+        app.cancel_connection();
+
+        assert!(matches!(app.connect, ConnectState::None));
+        assert!(app.oauth_rx.is_none());
+        assert!(app.device_code_rx.is_none());
+    }
+
+    #[test]
+    fn test_enter_new_credentials_from_existing() {
+        let mut app = App::new_without_banner();
+        app.connect = ConnectState::ExistingCredential {
+            provider: Provider::OpenRouter,
+            masked_key: "sk-or...xyz".to_string(),
+            selected: 1,
+        };
+
+        app.enter_new_credentials();
+
+        match &app.connect {
+            ConnectState::EnteringApiKey {
+                provider,
+                input,
+                cursor,
+                error,
+            } => {
+                assert_eq!(*provider, Provider::OpenRouter);
+                assert!(input.is_empty());
+                assert_eq!(*cursor, 0);
+                assert!(error.is_none());
+            }
+            _ => panic!("Expected EnteringApiKey state"),
+        }
+    }
+
+    #[test]
+    fn test_connect_state_oauth_pending() {
+        let device_code = DeviceCode {
+            device_code: "test_code".to_string(),
+            user_code: "ABCD-1234".to_string(),
+            verification_uri: "https://github.com/login/device".to_string(),
+            verification_uri_complete: None,
+            expires_in: 900,
+            interval: 5,
+        };
+        let auth_dialog = AuthDialog::new("GitHub Copilot", device_code);
+        let state = ConnectState::OAuthPending {
+            provider: Provider::GitHubCopilot,
+            auth_dialog,
+        };
+        assert!(state.is_active());
+        assert_eq!(state.provider(), Some(Provider::GitHubCopilot));
+    }
+
+    #[test]
+    fn test_connect_state_oauth_polling() {
+        let device_code = DeviceCode {
+            device_code: "test_code".to_string(),
+            user_code: "WXYZ-5678".to_string(),
+            verification_uri: "https://github.com/login/device".to_string(),
+            verification_uri_complete: Some("https://github.com/login/device?code=WXYZ-5678".to_string()),
+            expires_in: 900,
+            interval: 5,
+        };
+        let auth_dialog = AuthDialog::new("GitHub Copilot", device_code);
+        let state = ConnectState::OAuthPolling {
+            provider: Provider::GitHubCopilot,
+            auth_dialog,
+        };
+        assert!(state.is_active());
+        assert_eq!(state.provider(), Some(Provider::GitHubCopilot));
+    }
+
+    #[test]
+    fn test_connection_error_fallback_to_toast() {
+        let mut app = App::new_without_banner();
+        // Set to a state that doesn't transition back to EnteringApiKey
+        app.connect = ConnectState::None;
+
+        app.connection_error("Some error".to_string());
+
+        // Should show toast and remain in None state
+        assert!(matches!(app.connect, ConnectState::None));
+        // Check that a toast was added
+        assert!(!app.toasts.toasts.is_empty());
+    }
+
+    #[test]
+    fn test_tick_oauth_dialog_decrements() {
+        let device_code = DeviceCode {
+            device_code: "test".to_string(),
+            user_code: "TEST-CODE".to_string(),
+            verification_uri: "https://example.com".to_string(),
+            verification_uri_complete: None,
+            expires_in: 100,
+            interval: 5,
+        };
+        let mut app = App::new_without_banner();
+        app.connect = ConnectState::OAuthPolling {
+            provider: Provider::GitHubCopilot,
+            auth_dialog: AuthDialog::new("Test", device_code),
+        };
+
+        // Tick the timer
+        app.tick_oauth_dialog();
+
+        // Check that seconds remaining decreased
+        if let ConnectState::OAuthPolling { auth_dialog, .. } = &app.connect {
+            assert_eq!(auth_dialog.seconds_remaining, 99);
+        } else {
+            panic!("Expected OAuthPolling state");
+        }
+    }
+
+    #[test]
+    fn test_tick_oauth_dialog_expires() {
+        let device_code = DeviceCode {
+            device_code: "test".to_string(),
+            user_code: "TEST-CODE".to_string(),
+            verification_uri: "https://example.com".to_string(),
+            verification_uri_complete: None,
+            expires_in: 1,
+            interval: 5,
+        };
+        let mut app = App::new_without_banner();
+        app.connect = ConnectState::OAuthPending {
+            provider: Provider::GitHubCopilot,
+            auth_dialog: AuthDialog::new("Test", device_code),
+        };
+
+        // Tick until expired
+        app.tick_oauth_dialog(); // 0 seconds remaining now
+
+        // Should transition to None and show error toast
+        assert!(matches!(app.connect, ConnectState::None));
+    }
+
+    #[test]
+    fn test_tick_oauth_dialog_no_op_for_other_states() {
+        let mut app = App::new_without_banner();
+        app.connect = ConnectState::SelectingMethod {
+            provider: Provider::Anthropic,
+            selected: 0,
+        };
+
+        // Ticking should have no effect
+        app.tick_oauth_dialog();
+
+        assert!(matches!(
+            app.connect,
+            ConnectState::SelectingMethod {
+                provider: Provider::Anthropic,
+                ..
+            }
+        ));
+    }
 }
