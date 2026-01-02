@@ -29,11 +29,29 @@ pub use openrouter::OpenRouterProvider;
 /// Each tuple contains (display_name, api_model_id).
 /// These are the models available through GitHub Copilot Chat API.
 pub const COPILOT_MODELS: &[(&str, &str)] = &[
-    ("Claude 3.5 Sonnet", "claude-3.5-sonnet"),
-    ("GPT-4o", "gpt-4o"),
-    ("GPT-4o Mini", "gpt-4o-mini"),
-    ("O1 Preview", "o1-preview"),
-    ("O1 Mini", "o1-mini"),
+    // Claude models (Anthropic)
+    ("Claude Sonnet 4.5", "claude-sonnet-4.5"),
+    ("Claude Sonnet 4", "claude-sonnet-4"),
+    ("Claude Opus 4.5", "claude-opus-4.5"),
+    ("Claude Opus 4.1", "claude-opus-4.1"),
+    ("Claude Haiku 4.5", "claude-haiku-4.5"),
+    // GPT models (OpenAI)
+    ("GPT-5.2", "gpt-5.2"),
+    ("GPT-5.1-Codex-Max", "gpt-5.1-codex-max"),
+    ("GPT-5.1-Codex", "gpt-5.1-codex"),
+    ("GPT-5.1-Codex-Mini", "gpt-5.1-codex-mini"),
+    ("GPT-5.1", "gpt-5.1"),
+    ("GPT-5-Codex", "gpt-5-codex"),
+    ("GPT-5 mini", "gpt-5-mini"),
+    ("GPT-5", "gpt-5"),
+    ("GPT-4.1", "gpt-4.1"),
+    // Gemini models (Google)
+    ("Gemini 3 Pro", "gemini-3-pro"),
+    ("Gemini 3 Flash", "gemini-3-flash"),
+    ("Gemini 2.5 Pro", "gemini-2.5-pro"),
+    // Other
+    ("Grok Code Fast 1", "grok-code-fast-1"),
+    ("Raptor mini", "raptor-mini"),
 ];
 
 /// Supported LLM providers.
@@ -84,7 +102,7 @@ impl Provider {
             Provider::Anthropic => "claude-sonnet-4-5",
             Provider::Ollama => "qwen3:4b",
             Provider::OpenRouter => "anthropic/claude-sonnet-4-5",
-            Provider::GitHubCopilot => "claude-3.5-sonnet",
+            Provider::GitHubCopilot => "claude-sonnet-4.5",
         }
     }
 
@@ -269,7 +287,7 @@ async fn validate_openrouter_key(client: &reqwest::Client, api_key: &str) -> Res
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .json(&serde_json::json!({
-            "model": "openai/gpt-4o-mini",
+            "model": "openai/claude-haiku-4.5",
             "max_tokens": 1,
             "messages": [{"role": "user", "content": "Hi"}]
         }))
@@ -677,7 +695,7 @@ mod tests {
     fn test_copilot_models_first_is_default() {
         // First model should match the default
         let (_, first_api_id) = COPILOT_MODELS[0];
-        assert_eq!(first_api_id, "claude-3.5-sonnet");
+        assert_eq!(first_api_id, "claude-sonnet-4.5");
         assert_eq!(first_api_id, Provider::GitHubCopilot.default_model());
     }
 }
