@@ -5,6 +5,9 @@
 //! - Anthropic (Claude)
 
 mod anthropic;
+mod provider;
+
+pub use provider::{LlmProvider, ProviderError, ProviderResult};
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
