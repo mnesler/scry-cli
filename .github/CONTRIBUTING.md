@@ -1,5 +1,21 @@
 # Development Workflow
 
+## Testing Requirements
+
+All new code must include tests. Before committing:
+
+1. **Write tests** for new functionality
+2. **Run `cargo test`** to verify all tests pass
+3. **Enforce test coverage** - no commits without corresponding tests for new code
+
+```bash
+# Run all tests
+cargo test
+
+# Run specific module tests
+cargo test <module_name>
+```
+
 ## Issue Management
 
 ### Closing Issues
