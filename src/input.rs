@@ -33,6 +33,9 @@ pub fn run_app<B: Backend>(
         // Process any streaming events first
         app.process_stream();
         
+        // Process async validation results
+        app.process_validation();
+        
         // Tick toast notifications to expire old ones
         app.tick_toasts();
         
@@ -44,8 +47,8 @@ pub fn run_app<B: Backend>(
             last_cursor_toggle = Instant::now();
         }
 
-        // Use timeout for animation: fast polling during animation/streaming, slower when idle
-        let timeout = if !app.animation.banner_complete || app.is_streaming() {
+        // Use timeout for animation: fast polling during animation/streaming/validation, slower when idle
+        let timeout = if !app.animation.banner_complete || app.is_streaming() || app.validation_rx.is_some() {
             Duration::from_millis(behavior.animation_frame_ms)
         } else {
             // Use shorter timeout to keep cursor blinking smooth
@@ -406,9 +409,8 @@ fn handle_entering_api_key_keys(
                             *error = Some(e.to_string());
                         }
                     } else {
-                        // Format is valid - transition to validating state
-                        // The actual async validation will be handled elsewhere
-                        app.connect = ConnectState::ValidatingKey { provider, key };
+                        // Format is valid - start async validation
+                        app.start_validation(provider, key);
                     }
                 }
             }

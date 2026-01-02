@@ -419,6 +419,8 @@ pub struct App {
     pub toasts: ToastState,
     /// Connection dialog state
     pub connect: ConnectState,
+    /// Receiver for async API key validation results
+    pub validation_rx: Option<tokio::sync::oneshot::Receiver<Result<(), String>>>,
 }
 
 impl App {
@@ -440,6 +442,7 @@ impl App {
             llm: LlmState::new(llm_config),
             toasts: ToastState::default(),
             connect: ConnectState::default(),
+            validation_rx: None,
         }
     }
 
@@ -464,6 +467,7 @@ impl App {
             llm: LlmState::new(llm_config),
             toasts: ToastState::default(),
             connect: ConnectState::default(),
+            validation_rx: None,
         }
     }
 
@@ -917,6 +921,60 @@ impl App {
             cursor: 0,
             error: None,
         };
+    }
+
+    /// Start async validation of an API key.
+    ///
+    /// Spawns a background task to validate the key and stores the receiver.
+    pub fn start_validation(&mut self, provider: Provider, key: String) {
+        use crate::llm::validate_api_key;
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.validation_rx = Some(rx);
+        self.connect = ConnectState::ValidatingKey {
+            provider,
+            key: key.clone(),
+        };
+
+        tokio::spawn(async move {
+            let result = validate_api_key(provider, &key).await;
+            let _ = tx.send(result);
+        });
+    }
+
+    /// Process async validation results.
+    ///
+    /// Call this in the event loop to check for completed validations.
+    /// Returns true if a validation completed (success or failure).
+    pub fn process_validation(&mut self) -> bool {
+        if let Some(mut rx) = self.validation_rx.take() {
+            match rx.try_recv() {
+                Ok(Ok(())) => {
+                    // Validation succeeded
+                    if let ConnectState::ValidatingKey { provider, key } = &self.connect {
+                        let provider = *provider;
+                        let key = key.clone();
+                        self.complete_connection(provider, Some(key));
+                    }
+                    return true;
+                }
+                Ok(Err(e)) => {
+                    // Validation failed
+                    self.connection_error(e);
+                    return true;
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
+                    // Still pending, put the receiver back
+                    self.validation_rx = Some(rx);
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                    // Channel closed unexpectedly
+                    self.connection_error("Validation task failed".to_string());
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
