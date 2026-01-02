@@ -208,13 +208,6 @@ pub fn render_menu(f: &mut Frame, app: &App, miami: &MiamiColors, config: &Confi
     let menu_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.menu_border()))
-        .title(Span::styled(
-            " Settings ",
-            Style::default()
-                .fg(accent_color)
-                .add_modifier(Modifier::BOLD),
-        ))
-        .title_alignment(Alignment::Center)
         .style(Style::default().bg(theme.menu_bg()));
 
     let menu_text = Paragraph::new(menu_lines)
