@@ -32,6 +32,7 @@ pub enum ConnectState {
     ExistingCredential {
         provider: Provider,
         masked_key: String,
+        current_model: Option<String>,
         selected: usize,
     },
     /// User is selecting how to authenticate (enter key, open browser, cancel).
@@ -820,9 +821,11 @@ impl App {
             if let Some(cred) = storage.get(provider.storage_key()) {
                 if !cred.is_expired() {
                     let masked = mask_api_key(cred.token());
+                    let current_model = cred.model().map(|s| s.to_string());
                     self.connect = ConnectState::ExistingCredential {
                         provider,
                         masked_key: masked,
+                        current_model,
                         selected: 0,
                     };
                     return;
@@ -1158,12 +1161,17 @@ impl App {
     fn finish_oauth_connection(&mut self, provider: Provider, token: OAuthToken, model: &str) {
         use crate::auth::{AuthStorage, Credential};
 
-        // Save the OAuth credential
+        // Save the OAuth credential with selected model
         if let Ok(mut storage) = AuthStorage::load() {
             let expires_at = token.expires_at();
             storage.set(
                 provider.storage_key(),
-                Credential::oauth(&token.access_token, token.refresh_token.clone(), expires_at),
+                Credential::oauth(
+                    &token.access_token,
+                    token.refresh_token.clone(),
+                    expires_at,
+                    Some(model.to_string()),
+                ),
             );
             if let Err(e) = storage.save() {
                 self.toast_warning(format!("Could not save credentials: {}", e));
@@ -1289,6 +1297,7 @@ mod tests {
         let state = ConnectState::ExistingCredential {
             provider: Provider::Anthropic,
             masked_key: "sk-a...xyz".to_string(),
+            current_model: None,
             selected: 1,
         };
         let cloned = state.clone();
@@ -1426,6 +1435,7 @@ mod tests {
         app.connect = ConnectState::ExistingCredential {
             provider: Provider::OpenRouter,
             masked_key: "sk-or...xyz".to_string(),
+            current_model: None,
             selected: 1,
         };
 

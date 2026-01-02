@@ -160,6 +160,7 @@ impl CopilotProvider {
                 &oauth_token.access_token,
                 oauth_token.refresh_token.clone(),
                 expires_at,
+                None, // Model will be saved by app.rs after selection
             ),
         );
         storage.save()?;

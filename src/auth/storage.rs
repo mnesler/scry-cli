@@ -43,6 +43,9 @@ pub enum Credential {
         refresh_token: Option<String>,
         /// When the access token expires.
         expires_at: Option<DateTime<Utc>>,
+        /// The last selected model for this provider (e.g., "claude-sonnet-4.5").
+        #[serde(default)]
+        model: Option<String>,
     },
 }
 
@@ -57,11 +60,13 @@ impl Credential {
         access_token: impl Into<String>,
         refresh_token: Option<String>,
         expires_at: Option<DateTime<Utc>>,
+        model: Option<String>,
     ) -> Self {
         Self::OAuth {
             access_token: access_token.into(),
             refresh_token,
             expires_at,
+            model,
         }
     }
 
@@ -70,6 +75,22 @@ impl Credential {
         match self {
             Self::ApiKey { key } => key,
             Self::OAuth { access_token, .. } => access_token,
+        }
+    }
+
+    /// Get the saved model for this credential, if any.
+    pub fn model(&self) -> Option<&str> {
+        match self {
+            Self::ApiKey { .. } => None,
+            Self::OAuth { model, .. } => model.as_deref(),
+        }
+    }
+
+    /// Get the refresh token for this credential, if any.
+    pub fn refresh_token(&self) -> Option<&str> {
+        match self {
+            Self::ApiKey { .. } => None,
+            Self::OAuth { refresh_token, .. } => refresh_token.as_deref(),
         }
     }
 
@@ -222,15 +243,16 @@ mod tests {
 
     #[test]
     fn test_credential_oauth() {
-        let cred = Credential::oauth("access-token", Some("refresh-token".to_string()), None);
+        let cred = Credential::oauth("access-token", Some("refresh-token".to_string()), None, None);
         assert_eq!(cred.token(), "access-token");
         assert!(!cred.is_expired());
+        assert_eq!(cred.model(), None);
     }
 
     #[test]
     fn test_credential_oauth_expired() {
         let expired = Utc::now() - chrono::Duration::hours(1);
-        let cred = Credential::oauth("access-token", Some("refresh".to_string()), Some(expired));
+        let cred = Credential::oauth("access-token", Some("refresh".to_string()), Some(expired), None);
         assert!(cred.is_expired());
         assert!(cred.needs_refresh());
     }
@@ -238,7 +260,7 @@ mod tests {
     #[test]
     fn test_credential_oauth_not_expired() {
         let future = Utc::now() + chrono::Duration::hours(1);
-        let cred = Credential::oauth("access-token", None, Some(future));
+        let cred = Credential::oauth("access-token", None, Some(future), None);
         assert!(!cred.is_expired());
     }
 
@@ -282,7 +304,7 @@ mod tests {
         let expired = Utc::now() - chrono::Duration::hours(1);
         storage.set(
             "copilot",
-            Credential::oauth("token", None, Some(expired)),
+            Credential::oauth("token", None, Some(expired), None),
         );
 
         assert_eq!(storage.get_valid_token("copilot"), None);
@@ -297,7 +319,7 @@ mod tests {
         storage.set("anthropic", Credential::api_key("sk-ant-123"));
         storage.set(
             "github_copilot",
-            Credential::oauth("gho_token", Some("refresh".to_string()), None),
+            Credential::oauth("gho_token", Some("refresh".to_string()), None, None),
         );
 
         storage.save_to(&path).unwrap();
@@ -330,11 +352,12 @@ mod tests {
         let expires = DateTime::parse_from_rfc3339("2025-01-03T12:00:00Z")
             .unwrap()
             .with_timezone(&Utc);
-        let cred = Credential::oauth("access", Some("refresh".to_string()), Some(expires));
+        let cred = Credential::oauth("access", Some("refresh".to_string()), Some(expires), Some("claude-sonnet-4.5".to_string()));
         let json = serde_json::to_string(&cred).unwrap();
         assert!(json.contains("\"type\":\"oauth\""));
         assert!(json.contains("\"access_token\":\"access\""));
         assert!(json.contains("\"refresh_token\":\"refresh\""));
+        assert!(json.contains("\"model\":\"claude-sonnet-4.5\""));
     }
 
     #[cfg(unix)]
@@ -351,5 +374,59 @@ mod tests {
         let metadata = std::fs::metadata(&path).unwrap();
         let mode = metadata.permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "File should have 0600 permissions");
+    }
+
+    #[test]
+    fn test_credential_oauth_with_model() {
+        let cred = Credential::oauth(
+            "access-token",
+            Some("refresh-token".to_string()),
+            None,
+            Some("claude-sonnet-4.5".to_string()),
+        );
+        assert_eq!(cred.token(), "access-token");
+        assert_eq!(cred.model(), Some("claude-sonnet-4.5"));
+        assert_eq!(cred.refresh_token(), Some("refresh-token"));
+    }
+
+    #[test]
+    fn test_credential_oauth_without_model() {
+        let cred = Credential::oauth("access-token", None, None, None);
+        assert_eq!(cred.token(), "access-token");
+        assert_eq!(cred.model(), None);
+    }
+
+    #[test]
+    fn test_credential_model_getter_api_key() {
+        let cred = Credential::api_key("sk-ant-123");
+        assert_eq!(cred.model(), None);
+    }
+
+    #[test]
+    fn test_oauth_credential_backward_compatibility() {
+        // Simulate old auth.json format without model field
+        let json = r#"{"type":"oauth","access_token":"token123","refresh_token":"refresh123","expires_at":null}"#;
+        let cred: Credential = serde_json::from_str(json).unwrap();
+        
+        assert_eq!(cred.token(), "token123");
+        assert_eq!(cred.model(), None); // Should default to None
+        assert_eq!(cred.refresh_token(), Some("refresh123"));
+    }
+
+    #[test]
+    fn test_oauth_credential_with_model_serialization() {
+        let cred = Credential::oauth(
+            "token",
+            Some("refresh".to_string()),
+            None,
+            Some("claude-opus-4.5".to_string()),
+        );
+        let json = serde_json::to_string(&cred).unwrap();
+        
+        assert!(json.contains("\"model\":\"claude-opus-4.5\""));
+        
+        // Deserialize and verify
+        let deserialized: Credential = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.model(), Some("claude-opus-4.5"));
     }
 }

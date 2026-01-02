@@ -221,9 +221,16 @@ pub fn render_connect_dialog(f: &mut Frame, app: &App) {
         ConnectState::ExistingCredential {
             provider,
             masked_key,
+            current_model,
             selected,
         } => {
-            render_existing_credential_dialog(f, provider.display_name(), masked_key, *selected);
+            render_existing_credential_dialog(
+                f,
+                provider.display_name(),
+                masked_key,
+                current_model.as_deref(),
+                *selected,
+            );
         }
         ConnectState::SelectingMethod { provider, selected } => {
             render_selecting_method_dialog(f, provider.display_name(), *selected);
@@ -260,6 +267,7 @@ fn render_existing_credential_dialog(
     f: &mut Frame,
     provider_name: &str,
     masked_key: &str,
+    current_model: Option<&str>,
     selected: usize,
 ) {
     let area = centered_rect(50, 40, f.size());
