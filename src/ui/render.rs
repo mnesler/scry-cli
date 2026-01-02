@@ -6,11 +6,11 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, ConnectionStatus};
+use crate::app::App;
 use crate::config::Config;
 use crate::message::Role;
 
-use super::gradient::{gradient_block_with_status, gradient_color};
+use super::gradient::gradient_color;
 use super::menu::render_menu;
 use super::text::{apply_miami_gradient_to_line, wrap_text};
 
@@ -127,23 +127,13 @@ pub fn ui(f: &mut Frame, app: &mut App, config: &Config) {
         })
         .collect();
 
-    // Status indicator for connection
-    let (status_text, status_color) = match &app.llm.status {
-        ConnectionStatus::NotConfigured => ("● No API Key", theme.status_not_configured()),
-        ConnectionStatus::Ready => ("● Ready", theme.status_ready()),
-        ConnectionStatus::Streaming => ("● Streaming...", theme.status_streaming()),
-        ConnectionStatus::Error(_) => ("● Error", theme.status_error()),
-    };
-
     // Purple to Blue gradient for chat area
-    let messages_list = List::new(messages).block(gradient_block_with_status(
-        " Scry ",
-        status_text,
-        status_color,
-        chunks[0],
-        chat_start,
-        chat_end,
-    ));
+    let mid_color = gradient_color(chat_start, chat_end, 0.5);
+    let messages_list = List::new(messages).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(mid_color))
+    );
 
     f.render_widget(messages_list, chunks[0]);
 
