@@ -183,76 +183,162 @@ impl LlmConfig {
 
 /// LLM client for making API calls.
 ///
-/// This is a unified client that dispatches to the appropriate provider.
+/// This is a unified client that wraps a provider implementing `LlmProvider`.
+/// It provides a simple interface for the rest of the application.
 #[derive(Clone)]
 pub struct LlmClient {
-    inner: Arc<LlmClientInner>,
-}
-
-enum LlmClientInner {
-    Anthropic(AnthropicClient),
-    /// Placeholder for providers not yet implemented
-    NotImplemented {
-        provider: Provider,
-        api_key: String,
-        model: String,
-    },
+    inner: Arc<dyn LlmProvider>,
 }
 
 impl LlmClient {
     /// Create a new LLM client with the given configuration.
+    ///
+    /// This will create the appropriate provider based on the config.
     pub fn new(config: LlmConfig) -> Self {
-        let inner = match config.provider {
-            Provider::Anthropic => LlmClientInner::Anthropic(AnthropicClient::new(config)),
+        let provider: Arc<dyn LlmProvider> = match config.provider {
+            Provider::Anthropic => Arc::new(AnthropicClient::new(config)),
             // For now, other providers use a placeholder that returns an error
             provider @ (Provider::Ollama | Provider::OpenRouter | Provider::GitHubCopilot) => {
-                LlmClientInner::NotImplemented {
-                    provider,
-                    api_key: config.api_key,
-                    model: config.model,
-                }
+                Arc::new(NotImplementedProvider::new(provider, config.model))
             }
         };
 
-        Self {
-            inner: Arc::new(inner),
-        }
+        Self { inner: provider }
+    }
+
+    /// Create a new LLM client from an existing provider.
+    ///
+    /// Use this when you have a custom or pre-configured provider.
+    pub fn from_provider(provider: Arc<dyn LlmProvider>) -> Self {
+        Self { inner: provider }
+    }
+
+    /// Get a reference to the underlying provider.
+    pub fn provider(&self) -> &dyn LlmProvider {
+        self.inner.as_ref()
+    }
+
+    /// Get the provider type.
+    pub fn provider_type(&self) -> Provider {
+        self.inner.provider()
     }
 
     /// Check if the client is configured.
     pub fn is_configured(&self) -> bool {
-        match self.inner.as_ref() {
-            LlmClientInner::Anthropic(client) => client.is_configured(),
-            LlmClientInner::NotImplemented { provider, api_key, .. } => {
-                !provider.requires_api_key() || !api_key.is_empty()
-            }
-        }
+        self.inner.is_configured()
     }
 
     /// Get the current model name.
     #[allow(dead_code)]
     pub fn model(&self) -> &str {
-        match self.inner.as_ref() {
-            LlmClientInner::Anthropic(client) => client.model(),
-            LlmClientInner::NotImplemented { model, .. } => model,
-        }
+        self.inner.model()
+    }
+
+    /// Get the display name for this provider.
+    pub fn display_name(&self) -> &str {
+        self.inner.display_name()
     }
 
     /// Send a streaming chat completion request.
     /// Returns a channel receiver that yields StreamEvents.
     pub fn stream_chat(&self, messages: Vec<ChatMessage>) -> mpsc::Receiver<StreamEvent> {
-        match self.inner.as_ref() {
-            LlmClientInner::Anthropic(client) => client.stream_chat(messages),
-            LlmClientInner::NotImplemented { provider, .. } => {
-                let (tx, rx) = mpsc::channel(1);
-                let provider_name = provider.display_name();
-                tokio::spawn(async move {
-                    let _ = tx.send(StreamEvent::Error(
-                        format!("{} provider is not yet implemented. Coming soon!", provider_name)
-                    )).await;
-                });
-                rx
-            }
+        self.inner.stream_chat(messages)
+    }
+}
+
+/// Placeholder provider for not-yet-implemented providers.
+struct NotImplementedProvider {
+    provider_type: Provider,
+    model: String,
+}
+
+impl NotImplementedProvider {
+    fn new(provider: Provider, model: String) -> Self {
+        Self {
+            provider_type: provider,
+            model,
         }
+    }
+}
+
+impl LlmProvider for NotImplementedProvider {
+    fn provider(&self) -> Provider {
+        self.provider_type
+    }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn is_configured(&self) -> bool {
+        // Not implemented providers are never configured
+        false
+    }
+
+    fn stream_chat(&self, _messages: Vec<ChatMessage>) -> mpsc::Receiver<StreamEvent> {
+        let (tx, rx) = mpsc::channel(1);
+        let provider_name = self.provider_type.display_name().to_string();
+        tokio::spawn(async move {
+            let _ = tx
+                .send(StreamEvent::Error(format!(
+                    "{} provider is not yet implemented. Coming soon!",
+                    provider_name
+                )))
+                .await;
+        });
+        rx
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_llm_client_anthropic_provider() {
+        let config = LlmConfig::default();
+        let client = LlmClient::new(config);
+        assert_eq!(client.provider_type(), Provider::Anthropic);
+        assert_eq!(client.display_name(), "Anthropic");
+    }
+
+    #[test]
+    fn test_llm_client_model() {
+        let mut config = LlmConfig::default();
+        config.model = "claude-opus-4".to_string();
+        let client = LlmClient::new(config);
+        assert_eq!(client.model(), "claude-opus-4");
+    }
+
+    #[test]
+    fn test_llm_client_not_configured_without_key() {
+        let config = LlmConfig::default();
+        let client = LlmClient::new(config);
+        assert!(!client.is_configured());
+    }
+
+    #[test]
+    fn test_llm_client_configured_with_key() {
+        let mut config = LlmConfig::default();
+        config.api_key = "test-key".to_string();
+        let client = LlmClient::new(config);
+        assert!(client.is_configured());
+    }
+
+    #[test]
+    fn test_llm_client_from_provider() {
+        let config = LlmConfig::default();
+        let anthropic = Arc::new(AnthropicClient::new(config));
+        let client = LlmClient::from_provider(anthropic);
+        assert_eq!(client.provider_type(), Provider::Anthropic);
+    }
+
+    #[test]
+    fn test_not_implemented_provider() {
+        let mut config = LlmConfig::default();
+        config.provider = Provider::Ollama;
+        let client = LlmClient::new(config);
+        assert_eq!(client.provider_type(), Provider::Ollama);
+        assert!(!client.is_configured());
     }
 }
