@@ -296,9 +296,23 @@ fn handle_connect_keys(app: &mut App, code: KeyCode) -> HandleResult {
 
 /// Handle keys in ExistingCredential state.
 ///
-/// Options: Use existing (0), Enter new (1), Cancel (2)
+/// Options:
+/// - Without saved model: Use existing (0), Enter new (1), Cancel (2)
+/// - With saved model: Use existing (0), Change model (1), Enter new (2), Cancel (3)
 fn handle_existing_credential_keys(app: &mut App, code: KeyCode, selected: usize) -> HandleResult {
-    const OPTION_COUNT: usize = 3;
+    // Determine if we have a saved model (affects option count)
+    let has_saved_model = if let ConnectState::ExistingCredential {
+        provider,
+        current_model,
+        ..
+    } = &app.connect
+    {
+        *provider == Provider::GitHubCopilot && current_model.is_some()
+    } else {
+        false
+    };
+
+    let option_count = if has_saved_model { 4 } else { 3 };
 
     match code {
         KeyCode::Up => {
@@ -308,7 +322,7 @@ fn handle_existing_credential_keys(app: &mut App, code: KeyCode, selected: usize
         }
         KeyCode::Down => {
             if let ConnectState::ExistingCredential { selected, .. } = &mut app.connect {
-                if *selected < OPTION_COUNT - 1 {
+                if *selected < option_count - 1 {
                     *selected += 1;
                 }
             }
@@ -316,8 +330,10 @@ fn handle_existing_credential_keys(app: &mut App, code: KeyCode, selected: usize
         KeyCode::Enter => {
             match selected {
                 0 => app.use_existing_credentials(),
+                1 if has_saved_model => app.change_copilot_model(),
                 1 => app.enter_new_credentials(),
-                2 | _ => app.cancel_connection(),
+                2 if has_saved_model => app.enter_new_credentials(),
+                2 | 3 | _ => app.cancel_connection(),
             }
         }
         KeyCode::Esc => {

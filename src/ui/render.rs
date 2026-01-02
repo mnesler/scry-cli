@@ -282,22 +282,34 @@ fn render_existing_credential_dialog(
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Layout: info line, spacer, options, spacer, hints
+    // Determine if we should show "Change model" option
+    let has_saved_model = current_model.is_some();
+
+    // Layout: info lines (key + optional model), spacer, options, hints
+    let info_lines = if has_saved_model { 3 } else { 2 };
     let chunks = Layout::vertical([
-        Constraint::Length(2), // Current key info
-        Constraint::Length(1), // Spacer
-        Constraint::Min(3),    // Options
-        Constraint::Length(1), // Hints
+        Constraint::Length(info_lines), // Current key info + optional model
+        Constraint::Length(1),           // Spacer
+        Constraint::Min(3),              // Options
+        Constraint::Length(1),           // Hints
     ])
     .split(inner);
 
-    // Current key info
-    let info = Paragraph::new(format!("Current key: {}", masked_key))
+    // Current key and model info
+    let mut info_text = format!("Current key: {}\n", masked_key);
+    if let Some(model) = current_model {
+        info_text.push_str(&format!("Current model: {}", model));
+    }
+    let info = Paragraph::new(info_text)
         .style(Style::default().fg(Color::Gray));
     f.render_widget(info, chunks[0]);
 
-    // Options
-    let options = vec!["Use existing key", "Enter new key", "Cancel"];
+    // Options - dynamic based on whether model is saved
+    let options = if has_saved_model {
+        vec!["Use existing credentials", "Change model", "Enter new credentials", "Cancel"]
+    } else {
+        vec!["Use existing credentials", "Enter new credentials", "Cancel"]
+    };
     let lines: Vec<Line> = options
         .iter()
         .enumerate()
