@@ -3,6 +3,7 @@
 //! This library exposes the core modules for testing and reuse.
 
 pub mod app;
+pub mod auth;
 pub mod config;
 pub mod input;
 pub mod llm;
