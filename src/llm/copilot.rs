@@ -111,7 +111,7 @@ impl CopilotProvider {
     pub fn new() -> Self {
         Self {
             client: Client::new(),
-            model: "claude-sonnet-4.5".to_string(),
+            model: "claude-3.5-sonnet".to_string(),
             temperature: Some(0.7),
             max_tokens: Some(4096),
             oauth_token: Arc::new(RwLock::new(None)),
@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn test_copilot_provider_new() {
         let provider = CopilotProvider::new();
-        assert_eq!(provider.model(), "claude-sonnet-4.5");
+        assert_eq!(provider.model(), "claude-3.5-sonnet");
         assert_eq!(provider.provider(), Provider::GitHubCopilot);
     }
 
@@ -489,7 +489,7 @@ mod tests {
     #[test]
     fn test_copilot_request_serialization() {
         let request = CopilotRequest {
-            model: "claude-sonnet-4.5".to_string(),
+            model: "claude-3.5-sonnet".to_string(),
             messages: vec![CopilotMessage {
                 role: "user".to_string(),
                 content: "Hello".to_string(),
@@ -500,7 +500,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("\"model\":\"claude-sonnet-4.5\""));
+        assert!(json.contains("\"model\":\"claude-3.5-sonnet\""));
         assert!(json.contains("\"stream\":true"));
         // max_tokens should be omitted when None
         assert!(!json.contains("\"max_tokens\""));

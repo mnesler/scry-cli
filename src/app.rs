@@ -1627,7 +1627,7 @@ mod tests {
         app.connect = ConnectState::ExistingCredential {
             provider: Provider::GitHubCopilot,
             masked_key: "gho_...xyz".to_string(),
-            current_model: Some("claude-sonnet-4.5".to_string()),
+            current_model: Some("claude-3.5-sonnet".to_string()),
             selected: 2,
         };
 
@@ -1798,11 +1798,11 @@ mod tests {
             oauth_token: token,
         };
 
-        app.complete_model_selection("claude-sonnet-4.5");
+        app.complete_model_selection("claude-3.5-sonnet");
 
         assert!(matches!(app.connect, ConnectState::None));
         assert_eq!(app.llm.config.provider, Provider::GitHubCopilot);
-        assert_eq!(app.llm.config.model, "claude-sonnet-4.5");
+        assert_eq!(app.llm.config.model, "claude-3.5-sonnet");
     }
 
     #[test]
@@ -1842,7 +1842,7 @@ mod tests {
                 "gho_test_token",
                 Some("refresh_token".to_string()),
                 None,
-                Some("claude-sonnet-4.5".to_string()),
+                Some("claude-3.5-sonnet".to_string()),
             ),
         );
         storage.save_to(&auth_path).unwrap();
@@ -1853,7 +1853,7 @@ mod tests {
         app.connect = ConnectState::ExistingCredential {
             provider: Provider::GitHubCopilot,
             masked_key: "gho_...ken".to_string(),
-            current_model: Some("claude-sonnet-4.5".to_string()),
+            current_model: Some("claude-3.5-sonnet".to_string()),
             selected: 1,
         };
 
@@ -1877,11 +1877,11 @@ mod tests {
 
         // This will try to save - would need temp dir for full test
         // But we can verify it compiles and the logic is correct
-        app.finish_oauth_connection(Provider::GitHubCopilot, token, "claude-sonnet-4.5");
+        app.finish_oauth_connection(Provider::GitHubCopilot, token, "claude-3.5-sonnet");
 
         // Verify state transitioned
         assert!(matches!(app.connect, ConnectState::None));
-        assert_eq!(app.llm.config.model, "claude-sonnet-4.5");
+        assert_eq!(app.llm.config.model, "claude-3.5-sonnet");
         assert_eq!(app.llm.config.provider, Provider::GitHubCopilot);
     }
 
@@ -1904,11 +1904,11 @@ mod tests {
             oauth_token: token,
         };
 
-        app.complete_model_selection("claude-haiku-4.5");
+        app.complete_model_selection("gpt-4o-mini");
 
         // Verify connection completed with selected model
         assert!(matches!(app.connect, ConnectState::None));
-        assert_eq!(app.llm.config.model, "claude-haiku-4.5");
+        assert_eq!(app.llm.config.model, "gpt-4o-mini");
     }
 
     #[test]
@@ -1916,7 +1916,7 @@ mod tests {
         let state = ConnectState::ExistingCredential {
             provider: Provider::GitHubCopilot,
             masked_key: "gho_...ken".to_string(),
-            current_model: Some("claude-sonnet-4.5".to_string()),
+            current_model: Some("claude-3.5-sonnet".to_string()),
             selected: 0,
         };
 
@@ -1925,7 +1925,7 @@ mod tests {
 
         // Verify pattern matching works
         if let ConnectState::ExistingCredential { current_model, .. } = state {
-            assert_eq!(current_model, Some("claude-sonnet-4.5".to_string()));
+            assert_eq!(current_model, Some("claude-3.5-sonnet".to_string()));
         } else {
             panic!("Expected ExistingCredential");
         }
@@ -1965,7 +1965,7 @@ mod tests {
         let state = ConnectState::ValidatingKey {
             provider: Provider::GitHubCopilot,
             key: "test_token".to_string(),
-            model: Some("claude-sonnet-4.5".to_string()),
+            model: Some("claude-3.5-sonnet".to_string()),
         };
         assert!(state.is_active());
         assert_eq!(state.provider(), Some(Provider::GitHubCopilot));

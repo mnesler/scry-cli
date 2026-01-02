@@ -27,14 +27,13 @@ pub use openrouter::OpenRouterProvider;
 /// Available models for GitHub Copilot.
 ///
 /// Each tuple contains (display_name, api_model_id).
-/// These are the Claude models and Raptor mini available through Copilot.
+/// These are the models available through GitHub Copilot Chat API.
 pub const COPILOT_MODELS: &[(&str, &str)] = &[
-    ("Claude Sonnet 4.5", "claude-sonnet-4.5"),
-    ("Claude Sonnet 4", "claude-sonnet-4"),
-    ("Claude Haiku 4.5", "claude-haiku-4.5"),
-    ("Claude Opus 4.5", "claude-opus-4.5"),
-    ("Claude Opus 4.1", "claude-opus-4.1"),
-    ("Raptor mini", "raptor-mini"),
+    ("Claude 3.5 Sonnet", "claude-3.5-sonnet"),
+    ("GPT-4o", "gpt-4o"),
+    ("GPT-4o Mini", "gpt-4o-mini"),
+    ("O1 Preview", "o1-preview"),
+    ("O1 Mini", "o1-mini"),
 ];
 
 /// Supported LLM providers.
@@ -85,7 +84,7 @@ impl Provider {
             Provider::Anthropic => "claude-sonnet-4-5",
             Provider::Ollama => "qwen3:4b",
             Provider::OpenRouter => "anthropic/claude-sonnet-4-5",
-            Provider::GitHubCopilot => "claude-sonnet-4.5",
+            Provider::GitHubCopilot => "claude-3.5-sonnet",
         }
     }
 
@@ -483,9 +482,9 @@ mod tests {
     #[test]
     fn test_llm_client_model() {
         let mut config = LlmConfig::default();
-        config.model = "claude-opus-4".to_string();
+        config.model = "claude-3-opus-20240229".to_string();
         let client = LlmClient::new(config);
-        assert_eq!(client.model(), "claude-opus-4");
+        assert_eq!(client.model(), "claude-3-opus-20240229");
     }
 
     #[test]
@@ -678,6 +677,7 @@ mod tests {
     fn test_copilot_models_first_is_default() {
         // First model should match the default
         let (_, first_api_id) = COPILOT_MODELS[0];
+        assert_eq!(first_api_id, "claude-3.5-sonnet");
         assert_eq!(first_api_id, Provider::GitHubCopilot.default_model());
     }
 }
