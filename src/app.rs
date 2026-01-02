@@ -412,7 +412,7 @@ impl App {
             } else {
                 // Not configured - show helpful message
                 self.chat.messages.push(Message::assistant(
-                    "No API key configured. Set OPENAI_API_KEY environment variable or use the menu to configure.".to_string()
+                    "No API key configured. Set ANTHROPIC_API_KEY environment variable or add it to your config file.".to_string()
                 ));
             }
         } else {

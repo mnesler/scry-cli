@@ -8,11 +8,11 @@ use tempfile::TempDir;
 fn test_config_default_has_expected_values() {
     let config = Config::default();
 
-    // Check LLM defaults
-    assert_eq!(config.llm.api_base, "https://api.openai.com/v1");
-    assert_eq!(config.llm.model, "gpt-4o-mini");
+    // Check LLM defaults (Anthropic)
+    assert_eq!(config.llm.api_base, "https://api.anthropic.com/v1");
+    assert_eq!(config.llm.model, "claude-sonnet-4-5");
     assert_eq!(config.llm.temperature, Some(0.7));
-    assert_eq!(config.llm.max_tokens, Some(2048));
+    assert_eq!(config.llm.max_tokens, Some(4096));
     assert!(config.llm.api_key.is_none());
 
     // Check behavior defaults
@@ -32,11 +32,11 @@ fn test_config_default_has_expected_values() {
 fn test_llm_config_file_default() {
     let llm = LlmConfigFile::default();
 
-    assert_eq!(llm.api_base, "https://api.openai.com/v1");
+    assert_eq!(llm.api_base, "https://api.anthropic.com/v1");
     assert!(llm.api_key.is_none());
-    assert_eq!(llm.model, "gpt-4o-mini");
+    assert_eq!(llm.model, "claude-sonnet-4-5");
     assert_eq!(llm.temperature, Some(0.7));
-    assert_eq!(llm.max_tokens, Some(2048));
+    assert_eq!(llm.max_tokens, Some(4096));
 }
 
 #[test]

@@ -8,9 +8,9 @@ pub type Rgb = [u8; 3];
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct LlmConfigFile {
-    /// API base URL (OpenAI-compatible)
+    /// API base URL
     pub api_base: String,
-    /// API key (can also be set via OPENAI_API_KEY env var)
+    /// API key (can also be set via ANTHROPIC_API_KEY env var)
     pub api_key: Option<String>,
     /// Model name
     pub model: String,
@@ -23,11 +23,11 @@ pub struct LlmConfigFile {
 impl Default for LlmConfigFile {
     fn default() -> Self {
         Self {
-            api_base: "https://api.openai.com/v1".to_string(),
+            api_base: "https://api.anthropic.com/v1".to_string(),
             api_key: None,
-            model: "gpt-4o-mini".to_string(),
+            model: "claude-sonnet-4-5".to_string(),
             temperature: Some(0.7),
-            max_tokens: Some(2048),
+            max_tokens: Some(4096),
         }
     }
 }
