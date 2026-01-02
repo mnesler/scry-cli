@@ -108,7 +108,7 @@ pub struct DeviceCodeConfig {
     pub scope: Option<String>,
 }
 
-/// GitHub Copilot OAuth configuration.
+/// OAuth provider configurations.
 impl DeviceCodeConfig {
     /// Create configuration for GitHub Copilot authentication.
     pub fn github_copilot() -> Self {
@@ -118,6 +118,17 @@ impl DeviceCodeConfig {
             device_code_url: "https://github.com/login/device/code".to_string(),
             token_url: "https://github.com/login/oauth/access_token".to_string(),
             scope: Some("read:user".to_string()),
+        }
+    }
+
+    /// Create configuration for Anthropic authentication.
+    pub fn anthropic() -> Self {
+        Self {
+            // Anthropic OAuth client ID (publicly available)
+            client_id: "scry-cli".to_string(),
+            device_code_url: "https://api.anthropic.com/v1/oauth/device/authorize".to_string(),
+            token_url: "https://api.anthropic.com/v1/oauth/token".to_string(),
+            scope: Some("chat:write".to_string()),
         }
     }
 }
@@ -140,6 +151,11 @@ impl DeviceCodeFlow {
     /// Create a handler for GitHub Copilot authentication.
     pub fn github_copilot() -> Self {
         Self::new(DeviceCodeConfig::github_copilot())
+    }
+
+    /// Create a handler for Anthropic authentication.
+    pub fn anthropic() -> Self {
+        Self::new(DeviceCodeConfig::anthropic())
     }
 
     /// Request a device code from the authorization server.

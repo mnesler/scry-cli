@@ -119,16 +119,16 @@ impl Provider {
     /// Check if this provider requires an API key.
     pub const fn requires_api_key(&self) -> bool {
         match self {
-            Provider::Anthropic => true,
+            Provider::Anthropic => false, // Uses OAuth
             Provider::Ollama => false,
             Provider::OpenRouter => true,
-            Provider::GitHubCopilot => true,
+            Provider::GitHubCopilot => false, // Uses OAuth
         }
     }
 
     /// Check if this provider uses OAuth device flow.
     pub const fn uses_oauth(&self) -> bool {
-        matches!(self, Provider::GitHubCopilot)
+        matches!(self, Provider::Anthropic | Provider::GitHubCopilot)
     }
 
     /// Get the storage key used in AuthStorage.
@@ -148,7 +148,7 @@ impl Provider {
     /// Returns `None` for providers that don't use API keys (e.g., Ollama, OAuth providers).
     pub const fn api_key_url(&self) -> Option<&'static str> {
         match self {
-            Provider::Anthropic => Some("https://console.anthropic.com/settings/keys"),
+            Provider::Anthropic => None,    // Uses OAuth, not API keys
             Provider::OpenRouter => Some("https://openrouter.ai/keys"),
             Provider::Ollama => None,       // Local, no API key needed
             Provider::GitHubCopilot => None, // Uses OAuth, not API keys
@@ -214,9 +214,9 @@ pub async fn validate_api_key(provider: Provider, api_key: &str) -> Result<(), S
             // Ollama doesn't need API key validation
             return Ok(());
         }
-        Provider::GitHubCopilot => {
-            // Copilot uses OAuth, not API keys
-            return Err("GitHub Copilot uses OAuth authentication, not API keys".to_string());
+        Provider::Anthropic | Provider::GitHubCopilot => {
+            // OAuth providers don't use API keys
+            return Err(format!("{} uses OAuth authentication, not API keys", provider.display_name()));
         }
         _ => {}
     }
@@ -229,9 +229,8 @@ pub async fn validate_api_key(provider: Provider, api_key: &str) -> Result<(), S
     let client = Client::new();
 
     match provider {
-        Provider::Anthropic => validate_anthropic_key(&client, api_key).await,
         Provider::OpenRouter => validate_openrouter_key(&client, api_key).await,
-        Provider::Ollama | Provider::GitHubCopilot => {
+        Provider::Anthropic | Provider::Ollama | Provider::GitHubCopilot => {
             // Already handled above
             unreachable!()
         }
@@ -507,7 +506,8 @@ mod tests {
 
     #[test]
     fn test_llm_client_not_configured_without_key() {
-        let config = LlmConfig::default();
+        let mut config = LlmConfig::default();
+        config.provider = Provider::OpenRouter; // OpenRouter requires API key
         let client = LlmClient::new(config);
         assert!(!client.is_configured());
     }
@@ -572,21 +572,17 @@ mod tests {
 
     #[test]
     fn test_provider_api_key_url() {
-        // Anthropic and OpenRouter have API key URLs
-        assert!(Provider::Anthropic.api_key_url().is_some());
-        assert!(Provider::Anthropic
-            .api_key_url()
-            .unwrap()
-            .contains("anthropic"));
+        // Only OpenRouter has API key URL now
         assert!(Provider::OpenRouter.api_key_url().is_some());
         assert!(Provider::OpenRouter
             .api_key_url()
             .unwrap()
             .contains("openrouter"));
 
-        // Ollama and Copilot don't use API keys
+        // Anthropic, Ollama, and Copilot don't use API keys
+        assert!(Provider::Anthropic.api_key_url().is_none()); // Uses OAuth
         assert!(Provider::Ollama.api_key_url().is_none());
-        assert!(Provider::GitHubCopilot.api_key_url().is_none());
+        assert!(Provider::GitHubCopilot.api_key_url().is_none()); // Uses OAuth
     }
 
     #[test]
@@ -633,7 +629,10 @@ mod tests {
             .validate_api_key_format("anything")
             .is_err());
 
-        // Copilot uses OAuth
+        // OAuth providers don't use API keys
+        assert!(Provider::Anthropic
+            .validate_api_key_format("anything")
+            .is_err());
         assert!(Provider::GitHubCopilot
             .validate_api_key_format("anything")
             .is_err());
@@ -641,10 +640,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_api_key_format_check_anthropic() {
-        // Invalid format should fail before network request
+        // Anthropic uses OAuth, not API keys - should fail
         let result = validate_api_key(Provider::Anthropic, "invalid-key").await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("sk-ant-"));
+        assert!(result.unwrap_err().contains("OAuth"));
     }
 
     #[tokio::test]
@@ -672,8 +671,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_api_key_empty() {
-        // Empty key should fail
-        let result = validate_api_key(Provider::Anthropic, "").await;
+        // Empty key should fail - use OpenRouter since Anthropic now uses OAuth
+        let result = validate_api_key(Provider::OpenRouter, "").await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("empty"));
     }

@@ -1168,7 +1168,15 @@ impl App {
 
         // Spawn task to request device code only (not polling yet)
         tokio::spawn(async move {
-            let flow = DeviceCodeFlow::github_copilot();
+            let flow = match provider {
+                Provider::Anthropic => DeviceCodeFlow::anthropic(),
+                Provider::GitHubCopilot => DeviceCodeFlow::github_copilot(),
+                _ => {
+                    let _ = tx.send(Err("Provider does not support OAuth".to_string()));
+                    return;
+                }
+            };
+            
             match flow.request_device_code().await {
                 Ok(device_code) => {
                     let _ = tx.send(Ok(device_code));
@@ -1180,11 +1188,26 @@ impl App {
         });
 
         // Create a placeholder device code for the dialog
+        let (placeholder_uri, placeholder_full_uri) = match provider {
+            Provider::Anthropic => (
+                "https://console.anthropic.com/device".to_string(),
+                None,
+            ),
+            Provider::GitHubCopilot => (
+                "https://github.com/login/device".to_string(),
+                None,
+            ),
+            _ => (
+                "https://example.com".to_string(),
+                None,
+            ),
+        };
+
         let placeholder_device_code = DeviceCode {
             device_code: String::new(),
             user_code: "Loading...".to_string(),
-            verification_uri: "https://github.com/login/device".to_string(),
-            verification_uri_complete: None,
+            verification_uri: placeholder_uri,
+            verification_uri_complete: placeholder_full_uri,
             expires_in: 900,
             interval: 5,
         };
@@ -1242,7 +1265,15 @@ impl App {
 
         let dc = device_code.clone();
         tokio::spawn(async move {
-            let flow = DeviceCodeFlow::github_copilot();
+            let flow = match provider {
+                Provider::Anthropic => DeviceCodeFlow::anthropic(),
+                Provider::GitHubCopilot => DeviceCodeFlow::github_copilot(),
+                _ => {
+                    let _ = tx.send(Err("Provider does not support OAuth".to_string()));
+                    return;
+                }
+            };
+            
             match flow.poll_for_token(&dc, || {}).await {
                 Ok(token) => {
                     let _ = tx.send(Ok(token));
@@ -1516,7 +1547,7 @@ mod tests {
     fn test_enter_new_credentials() {
         let mut app = App::new_without_banner();
         app.connect = ConnectState::SelectingMethod {
-            provider: Provider::Anthropic,
+            provider: Provider::OpenRouter,
             selected: 0,
         };
 
@@ -1525,7 +1556,7 @@ mod tests {
         assert!(matches!(
             app.connect,
             ConnectState::EnteringApiKey {
-                provider: Provider::Anthropic,
+                provider: Provider::OpenRouter,
                 ..
             }
         ));

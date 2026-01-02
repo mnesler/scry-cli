@@ -370,13 +370,15 @@ mod tests {
     fn test_client_not_configured() {
         let config = LlmConfig::default();
         let client = AnthropicClient::new(config);
-        assert!(!client.is_configured());
+        // Anthropic now uses OAuth, so it's always "configured" from requires_api_key perspective
+        // but may not have a valid token yet
+        assert!(client.is_configured());
     }
 
     #[test]
     fn test_client_configured() {
         let mut config = LlmConfig::default();
-        config.api_key = "test-key".to_string();
+        config.api_key = "test-oauth-token".to_string(); // Now an OAuth token, not API key
         let client = AnthropicClient::new(config);
         assert!(client.is_configured());
     }
