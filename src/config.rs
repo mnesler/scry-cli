@@ -266,13 +266,6 @@ impl Config {
         std::fs::write(path, contents)?;
         Ok(())
     }
-
-    /// Update LLM config from runtime settings.
-    pub fn update_llm(&mut self, api_base: String, api_key: String, model: String) {
-        self.llm.api_base = api_base;
-        self.llm.api_key = if api_key.is_empty() { None } else { Some(api_key) };
-        self.llm.model = model;
-    }
 }
 
 impl ColorConfig {

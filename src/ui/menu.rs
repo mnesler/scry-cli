@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, MenuItem};
+use crate::app::App;
 use crate::config::{Config, MiamiColors};
 use super::gradient::gradient_color;
 
@@ -23,7 +23,7 @@ pub fn render_menu(f: &mut Frame, app: &App, miami: &MiamiColors, config: &Confi
 
     // Calculate menu size
     let menu_width = 54u16;
-    let menu_height = (menu_items.len() as u16) + 8; // +8 for borders, padding, title, hints
+    let menu_height = (menu_items.len() as u16) + 8; // +8 for borders, padding, hints
 
     // Center the menu
     let menu_x = (area.width.saturating_sub(menu_width)) / 2;
@@ -56,56 +56,20 @@ pub fn render_menu(f: &mut Frame, app: &App, miami: &MiamiColors, config: &Confi
     let highlight_color = gradient_color(miami.pink, miami.cyan, 0.5);
     let selected_bg = theme.menu_selected_bg();
     let unselected_fg = theme.menu_unselected_fg();
-    let input_bg = theme.menu_input_bg();
 
     // Build menu content
     let mut menu_lines = vec![
         Line::from(""), // Top padding
     ];
 
-    let is_editing = app.is_menu_input_mode();
-
     for (i, &item) in menu_items.iter().enumerate() {
         let is_selected = i == app.menu.selected;
-        let is_config_field = item.is_config_field();
-        
-        // Check if this field is being edited
-        let is_being_edited = is_selected && item.to_input_mode() == Some(app.menu.input_mode);
+        let label = item.label();
 
-        if is_being_edited {
-            // Show input field
-            let display_value = if item == MenuItem::ApiKey {
-                // Mask the input for API key
-                "*".repeat(app.menu.input.len())
-            } else {
-                app.menu.input.clone()
-            };
-            
-            menu_lines.push(Line::from(vec![
-                Span::styled(
-                    "  \u{25b8} ",
-                    Style::default()
-                        .fg(accent_color)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("{}: ", item.label()),
-                    Style::default()
-                        .fg(accent_color)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!("{}_", display_value),
-                    Style::default()
-                        .fg(Color::White)
-                        .bg(input_bg),
-                ),
-            ]));
-        } else if is_selected {
+        if is_selected {
             // Selected: highlighted row with accent color
-            let label = item.label();
-
-            let mut spans = vec![
+            let remaining = 50 - label.len() - 4;
+            let spans = vec![
                 Span::styled(
                     "  \u{25b8} ",
                     Style::default()
@@ -120,56 +84,22 @@ pub fn render_menu(f: &mut Frame, app: &App, miami: &MiamiColors, config: &Confi
                         .bg(selected_bg)
                         .add_modifier(Modifier::BOLD),
                 ),
-            ];
-
-            // Add current value for config fields
-            if is_config_field {
-                let value = app.get_config_display(item);
-                let remaining_width = 46 - label.len() - value.len();
-                spans.push(Span::styled(
-                    format!("{:>width$}", "", width = remaining_width.max(1)),
-                    Style::default().bg(selected_bg),
-                ));
-                spans.push(Span::styled(
-                    value,
-                    Style::default()
-                        .fg(unselected_fg)
-                        .bg(selected_bg),
-                ));
-            } else {
-                let remaining = 50 - label.len() - 4;
-                spans.push(Span::styled(
+                Span::styled(
                     format!("{:width$}", "", width = remaining),
                     Style::default().bg(selected_bg),
-                ));
-            }
+                ),
+            ];
 
             menu_lines.push(Line::from(spans));
         } else {
             // Unselected: dimmer text
-            let label = item.label();
-
-            let mut spans = vec![
+            let spans = vec![
                 Span::styled("    ", Style::default()),
                 Span::styled(
                     label.to_string(),
                     Style::default().fg(unselected_fg),
                 ),
             ];
-
-            // Add current value for config fields
-            if is_config_field {
-                let value = app.get_config_display(item);
-                let remaining_width = 46 - label.len() - value.len();
-                spans.push(Span::styled(
-                    format!("{:>width$}", "", width = remaining_width.max(1)),
-                    Style::default(),
-                ));
-                spans.push(Span::styled(
-                    value,
-                    Style::default().fg(Color::Rgb(100, 100, 120)),
-                ));
-            }
 
             menu_lines.push(Line::from(spans));
         }
@@ -184,25 +114,15 @@ pub fn render_menu(f: &mut Frame, app: &App, miami: &MiamiColors, config: &Confi
     )));
 
     // Keyboard hints
-    if is_editing {
-        menu_lines.push(Line::from(vec![
-            Span::styled("  ", Style::default()),
-            Span::styled("\u{23ce}", Style::default().fg(Color::Rgb(0, 255, 128)).add_modifier(Modifier::BOLD)),
-            Span::styled(" Confirm  ", Style::default().fg(Color::Rgb(100, 100, 120))),
-            Span::styled("Esc", Style::default().fg(Color::Rgb(255, 100, 100)).add_modifier(Modifier::BOLD)),
-            Span::styled(" Cancel", Style::default().fg(Color::Rgb(100, 100, 120))),
-        ]));
-    } else {
-        menu_lines.push(Line::from(vec![
-            Span::styled("  ", Style::default()),
-            Span::styled("\u{2191}\u{2193}", Style::default().fg(accent_color).add_modifier(Modifier::BOLD)),
-            Span::styled(" Navigate  ", Style::default().fg(Color::Rgb(100, 100, 120))),
-            Span::styled("\u{23ce}", Style::default().fg(Color::Rgb(0, 255, 128)).add_modifier(Modifier::BOLD)),
-            Span::styled(" Edit/Select  ", Style::default().fg(Color::Rgb(100, 100, 120))),
-            Span::styled("Esc", Style::default().fg(Color::Rgb(255, 100, 100)).add_modifier(Modifier::BOLD)),
-            Span::styled(" Close", Style::default().fg(Color::Rgb(100, 100, 120))),
-        ]));
-    }
+    menu_lines.push(Line::from(vec![
+        Span::styled("  ", Style::default()),
+        Span::styled("\u{2191}\u{2193}", Style::default().fg(accent_color).add_modifier(Modifier::BOLD)),
+        Span::styled(" Navigate  ", Style::default().fg(Color::Rgb(100, 100, 120))),
+        Span::styled("\u{23ce}", Style::default().fg(Color::Rgb(0, 255, 128)).add_modifier(Modifier::BOLD)),
+        Span::styled(" Select  ", Style::default().fg(Color::Rgb(100, 100, 120))),
+        Span::styled("Esc", Style::default().fg(Color::Rgb(255, 100, 100)).add_modifier(Modifier::BOLD)),
+        Span::styled(" Close", Style::default().fg(Color::Rgb(100, 100, 120))),
+    ]));
 
     // Menu block with double border for modal effect
     let menu_block = Block::default()

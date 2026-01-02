@@ -19,25 +19,16 @@ pub enum ConnectionStatus {
 }
 
 /// Input mode for the application.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InputMode {
     /// Normal chat input
+    #[default]
     Chat,
-    /// Entering API key in menu
-    ApiKey,
-    /// Entering API base URL in menu
-    ApiBase,
-    /// Entering model name in menu
-    Model,
 }
 
 /// Menu items available in the settings menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuItem {
-    ApiKey,
-    ApiBase,
-    Model,
-    SaveConfig,
     Exit,
 }
 
@@ -45,10 +36,6 @@ impl MenuItem {
     /// Returns all menu items in display order.
     pub const fn all() -> &'static [MenuItem] {
         &[
-            MenuItem::ApiKey,
-            MenuItem::ApiBase,
-            MenuItem::Model,
-            MenuItem::SaveConfig,
             MenuItem::Exit,
         ]
     }
@@ -56,26 +43,7 @@ impl MenuItem {
     /// Returns the display label for this menu item.
     pub const fn label(&self) -> &'static str {
         match self {
-            MenuItem::ApiKey => "API Key",
-            MenuItem::ApiBase => "API Base URL",
-            MenuItem::Model => "Model",
-            MenuItem::SaveConfig => "Save Config",
             MenuItem::Exit => "Exit",
-        }
-    }
-
-    /// Returns true if this item is a configurable field.
-    pub const fn is_config_field(&self) -> bool {
-        matches!(self, MenuItem::ApiKey | MenuItem::ApiBase | MenuItem::Model)
-    }
-
-    /// Returns the corresponding InputMode for config fields.
-    pub const fn to_input_mode(&self) -> Option<InputMode> {
-        match self {
-            MenuItem::ApiKey => Some(InputMode::ApiKey),
-            MenuItem::ApiBase => Some(InputMode::ApiBase),
-            MenuItem::Model => Some(InputMode::Model),
-            _ => None,
         }
     }
 }
@@ -197,10 +165,6 @@ pub struct MenuState {
     pub visible: bool,
     /// Currently selected menu item index
     pub selected: usize,
-    /// Current input mode (Chat or editing a field)
-    pub input_mode: InputMode,
-    /// Temporary input for menu fields
-    pub input: String,
 }
 
 impl MenuState {
@@ -224,33 +188,6 @@ impl MenuState {
         if self.selected < menu_items_count - 1 {
             self.selected += 1;
         }
-    }
-
-    /// Check if in a menu input mode.
-    pub fn is_input_mode(&self) -> bool {
-        self.input_mode != InputMode::Chat
-    }
-
-    /// Handle character input for menu fields.
-    pub fn handle_char(&mut self, c: char) {
-        self.input.push(c);
-    }
-
-    /// Handle backspace for menu fields.
-    pub fn handle_backspace(&mut self) {
-        self.input.pop();
-    }
-
-    /// Cancel menu input.
-    pub fn cancel_input(&mut self) {
-        self.input.clear();
-        self.input_mode = InputMode::Chat;
-    }
-}
-
-impl Default for InputMode {
-    fn default() -> Self {
-        InputMode::Chat
     }
 }
 
@@ -392,17 +329,6 @@ impl App {
             animation: AnimationState::no_banner(),
             llm: LlmState::new(llm_config),
         }
-    }
-
-    /// Save current LLM configuration to file.
-    pub fn save_config(&self) -> anyhow::Result<()> {
-        let mut config = Config::load();
-        config.update_llm(
-            self.llm.config.api_base.clone(),
-            self.llm.config.api_key.clone(),
-            self.llm.config.model.clone(),
-        );
-        config.save()
     }
 
     /// Toggle cursor visibility for blinking effect.
@@ -621,85 +547,6 @@ impl App {
     /// Get the list of menu items.
     pub fn menu_items() -> &'static [MenuItem] {
         MenuItem::all()
-    }
-
-    /// Apply the current LLM config and recreate the client.
-    pub fn apply_llm_config(&mut self) {
-        self.llm.apply_config();
-    }
-
-    /// Start editing a menu field.
-    pub fn start_menu_input(&mut self, mode: InputMode) {
-        self.menu.input_mode = mode;
-        // Pre-fill with current value
-        self.menu.input = match mode {
-            InputMode::ApiKey => self.llm.config.api_key.clone(),
-            InputMode::ApiBase => self.llm.config.api_base.clone(),
-            InputMode::Model => self.llm.config.model.clone(),
-            InputMode::Chat => String::new(),
-        };
-    }
-
-    /// Confirm menu input and apply the value.
-    pub fn confirm_menu_input(&mut self) {
-        match self.menu.input_mode {
-            InputMode::ApiKey => {
-                self.llm.config.api_key = self.menu.input.clone();
-                self.apply_llm_config();
-            }
-            InputMode::ApiBase => {
-                self.llm.config.api_base = self.menu.input.clone();
-                self.apply_llm_config();
-            }
-            InputMode::Model => {
-                self.llm.config.model = self.menu.input.clone();
-                self.apply_llm_config();
-            }
-            InputMode::Chat => {}
-        }
-        self.menu.input.clear();
-        self.menu.input_mode = InputMode::Chat;
-    }
-
-    /// Cancel menu input.
-    pub fn cancel_menu_input(&mut self) {
-        self.menu.cancel_input();
-    }
-
-    /// Handle character input for menu fields.
-    pub fn handle_menu_char(&mut self, c: char) {
-        self.menu.handle_char(c);
-    }
-
-    /// Handle backspace for menu fields.
-    pub fn handle_menu_backspace(&mut self) {
-        self.menu.handle_backspace();
-    }
-
-    /// Check if in a menu input mode.
-    pub fn is_menu_input_mode(&self) -> bool {
-        self.menu.is_input_mode()
-    }
-
-    /// Get display value for a config field (masked for API key).
-    pub fn get_config_display(&self, item: MenuItem) -> String {
-        match item {
-            MenuItem::ApiKey => {
-                if self.llm.config.api_key.is_empty() {
-                    "(not set)".to_string()
-                } else {
-                    let key = &self.llm.config.api_key;
-                    if key.len() > 8 {
-                        format!("{}...{}", &key[..4], &key[key.len()-4..])
-                    } else {
-                        "****".to_string()
-                    }
-                }
-            }
-            MenuItem::ApiBase => self.llm.config.api_base.clone(),
-            MenuItem::Model => self.llm.config.model.clone(),
-            _ => String::new(),
-        }
     }
 
     /// Get max scroll offset based on message count.

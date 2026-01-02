@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::{backend::Backend, Terminal};
 
-use crate::app::{App, InputMode, MenuItem};
+use crate::app::{App, MenuItem};
 use crate::config::Config;
 use crate::ui;
 
@@ -101,27 +101,6 @@ fn handle_key_event(
 
 /// Handle key events when the menu is open.
 fn handle_menu_keys(app: &mut App, code: KeyCode) -> HandleResult {
-    // Check if we're in a menu input mode
-    if app.is_menu_input_mode() {
-        match code {
-            KeyCode::Enter => {
-                app.confirm_menu_input();
-            }
-            KeyCode::Esc => {
-                app.cancel_menu_input();
-            }
-            KeyCode::Backspace => {
-                app.handle_menu_backspace();
-            }
-            KeyCode::Char(c) => {
-                app.handle_menu_char(c);
-            }
-            _ => {}
-        }
-        return HandleResult::Continue;
-    }
-
-    // Normal menu navigation
     match code {
         KeyCode::Up => {
             app.menu_up();
@@ -135,28 +114,6 @@ fn handle_menu_keys(app: &mut App, code: KeyCode) -> HandleResult {
             let menu_items = App::menu_items();
             if let Some(&selected) = menu_items.get(app.menu.selected) {
                 match selected {
-                    MenuItem::ApiKey => {
-                        app.start_menu_input(InputMode::ApiKey);
-                    }
-                    MenuItem::ApiBase => {
-                        app.start_menu_input(InputMode::ApiBase);
-                    }
-                    MenuItem::Model => {
-                        app.start_menu_input(InputMode::Model);
-                    }
-                    MenuItem::SaveConfig => {
-                        // Save config to file
-                        if let Err(e) = app.save_config() {
-                            app.chat.messages.push(crate::message::Message::assistant(
-                                format!("Failed to save config: {}", e)
-                            ));
-                        } else {
-                            app.chat.messages.push(crate::message::Message::assistant(
-                                "Configuration saved successfully!".to_string()
-                            ));
-                        }
-                        app.menu.visible = false;
-                    }
                     MenuItem::Exit => {
                         return HandleResult::Exit;
                     }
