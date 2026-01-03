@@ -1060,8 +1060,11 @@ impl App {
             _ => return,
         };
 
-        // OAuth providers should use device flow, not API key entry
-        if provider.uses_oauth() {
+        // Anthropic has its own OAuth flow with method selection
+        if provider == Provider::Anthropic {
+            self.connect = ConnectState::SelectingAnthropicMethod { selected: 0 };
+        } else if provider.uses_oauth() {
+            // Copilot uses OAuth device code flow
             self.start_oauth_flow(provider);
         } else {
             self.connect = ConnectState::EnteringApiKey {
@@ -1753,6 +1756,26 @@ mod tests {
                 provider: Provider::OpenRouter,
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn test_enter_new_credentials_anthropic() {
+        let mut app = App::new_without_banner();
+        // Simulate existing Anthropic credential scenario
+        app.connect = ConnectState::ExistingCredential {
+            provider: Provider::Anthropic,
+            masked_key: "sk-ant-***test".to_string(),
+            current_model: None,
+            selected: 0,
+        };
+
+        // When user chooses "Re-authenticate", should go to Anthropic method selection
+        app.enter_new_credentials();
+
+        assert!(matches!(
+            app.connect,
+            ConnectState::SelectingAnthropicMethod { selected: 0 }
         ));
     }
 
