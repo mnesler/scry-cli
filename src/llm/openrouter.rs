@@ -290,6 +290,7 @@ mod tests {
             model: "anthropic/claude-sonnet-4-5".to_string(),
             temperature: Some(0.7),
             max_tokens: Some(4096),
+            credential_type: crate::llm::CredentialType::ApiKey,
         };
         let provider = OpenRouterProvider::new(config);
         assert_eq!(provider.provider(), Provider::OpenRouter);
@@ -323,6 +324,7 @@ mod tests {
             model: "test".to_string(),
             temperature: None,
             max_tokens: None,
+            credential_type: crate::llm::CredentialType::ApiKey,
         };
         let provider = OpenRouterProvider::new(config);
         assert_eq!(provider.display_name(), "OpenRouter");

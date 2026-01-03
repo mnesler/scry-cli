@@ -933,8 +933,10 @@ impl App {
 
         if let Some(key) = api_key {
             self.llm.config.api_key = key;
+            self.llm.config.credential_type = crate::llm::CredentialType::ApiKey;
         } else if !provider.requires_api_key() {
             self.llm.config.api_key.clear();
+            self.llm.config.credential_type = crate::llm::CredentialType::ApiKey;
         }
 
         self.llm.apply_config();
@@ -981,6 +983,7 @@ impl App {
                                 self.llm.config.api_base = provider.default_api_base().to_string();
                                 self.llm.config.model = model.to_string();
                                 self.llm.config.api_key = key;
+                                self.llm.config.credential_type = crate::llm::CredentialType::OAuth;
                                 self.llm.apply_config();
                                 self.connect = ConnectState::None;
                                 self.toast_success(format!("Connected to {} with {}", 
@@ -1011,7 +1014,25 @@ impl App {
                     }
                     
                     // For other providers, connect directly
-                    self.complete_connection(provider, Some(key));
+                    // Determine credential type from storage
+                    use crate::auth::Credential;
+                    let credential_type = match cred {
+                        Credential::OAuth { .. } => crate::llm::CredentialType::OAuth,
+                        Credential::ApiKey { .. } => crate::llm::CredentialType::ApiKey,
+                    };
+                    
+                    self.llm.config.provider = provider;
+                    self.llm.config.api_base = provider.default_api_base().to_string();
+                    if let Some(model) = cred.model() {
+                        self.llm.config.model = model.to_string();
+                    } else {
+                        self.llm.config.model = provider.default_model().to_string();
+                    }
+                    self.llm.config.api_key = key;
+                    self.llm.config.credential_type = credential_type;
+                    self.llm.apply_config();
+                    self.connect = ConnectState::None;
+                    self.toast_success(format!("Connected to {}", provider.display_name()));
                     return;
                 }
             }
@@ -1150,6 +1171,7 @@ impl App {
                             self.llm.config.api_base = provider.default_api_base().to_string();
                             self.llm.config.model = model_name.clone();
                             self.llm.config.api_key = key;
+                            self.llm.config.credential_type = crate::llm::CredentialType::OAuth;
                             self.llm.apply_config();
                             self.connect = ConnectState::None;
                             self.toast_success(format!("Connected to {} with {}", 
@@ -1402,6 +1424,7 @@ impl App {
         self.llm.config.api_base = provider.default_api_base().to_string();
         self.llm.config.model = model.to_string();
         self.llm.config.api_key = token.access_token;
+        self.llm.config.credential_type = crate::llm::CredentialType::OAuth;
         self.llm.apply_config();
         self.connect = ConnectState::None;
 

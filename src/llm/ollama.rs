@@ -241,6 +241,7 @@ mod tests {
             model: "qwen3:4b".to_string(),
             temperature: Some(0.7),
             max_tokens: None,
+            credential_type: crate::llm::CredentialType::ApiKey,
         };
         let provider = OllamaProvider::new(config);
         assert_eq!(provider.provider(), Provider::Ollama);

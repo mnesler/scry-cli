@@ -351,6 +351,14 @@ pub enum StreamEvent {
     AuthError,
 }
 
+/// Type of credential being used for API authentication.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CredentialType {
+    #[default]
+    ApiKey,
+    OAuth,
+}
+
 /// LLM client configuration.
 #[derive(Debug, Clone)]
 pub struct LlmConfig {
@@ -360,6 +368,7 @@ pub struct LlmConfig {
     pub model: String,
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
+    pub credential_type: CredentialType,
 }
 
 impl Default for LlmConfig {
@@ -372,6 +381,7 @@ impl Default for LlmConfig {
             model: provider.default_model().to_string(),
             temperature: Some(0.7),
             max_tokens: Some(4096),
+            credential_type: CredentialType::default(),
         }
     }
 }

@@ -8,6 +8,8 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+
+use crate::llm::CredentialType;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -172,18 +174,16 @@ async fn stream_chat_inner(
     // Build request with appropriate authentication headers
     // OAuth tokens use Authorization header, API keys use x-api-key header
     let mut request = client
-        .post(&url)
+        .post(&format!("{}/v1/messages", config.api_base))
         .header("anthropic-version", ANTHROPIC_VERSION)
         .header("Content-Type", "application/json");
 
-    // Detect if this is an OAuth token or API key by prefix
-    // OAuth access tokens start with "sk-ant-oat01-"
-    // API keys start with "sk-ant-api03-"
-    if config.api_key.starts_with("sk-ant-oat01-") || config.api_key.starts_with("sk-ant-ort01-") {
-        // OAuth token - use Authorization header
+    // Use credential_type from config to determine auth method
+    if config.credential_type == CredentialType::OAuth {
+        // OAuth token - use Authorization header with all required beta headers
         request = request
             .header("Authorization", format!("Bearer {}", config.api_key))
-            .header("anthropic-beta", "oauth-2025-04-20");
+            .header("anthropic-beta", "oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14");
     } else {
         // API key - use x-api-key header
         request = request.header("x-api-key", &config.api_key);
