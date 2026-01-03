@@ -9,6 +9,7 @@
 //! - Gradient utilities
 //! - Text processing
 
+pub mod anthropic_dialogs;
 mod auth_dialog;
 mod dialog;
 mod gradient;

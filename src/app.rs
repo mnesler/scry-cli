@@ -65,6 +65,22 @@ pub enum ConnectState {
         provider: Provider,
         auth_dialog: AuthDialog,
     },
+    /// User is selecting Anthropic authentication method (Claude Pro/Max, Create API Key, Manual).
+    SelectingAnthropicMethod {
+        selected: usize,
+    },
+    /// User is entering authorization code from Anthropic OAuth.
+    EnteringAuthCode {
+        method: crate::auth::AnthropicAuthMethod,
+        oauth_handler: crate::auth::AnthropicOAuth,
+        input: String,
+        cursor: usize,
+        error: Option<String>,
+    },
+    /// Exchanging authorization code for access token (async operation).
+    ExchangingCode {
+        method: crate::auth::AnthropicAuthMethod,
+    },
     /// User is selecting a model after OAuth authentication (Copilot only).
     SelectingModel {
         provider: Provider,
@@ -96,6 +112,9 @@ impl ConnectState {
             | Self::OAuthPending { provider, .. }
             | Self::OAuthPolling { provider, .. }
             | Self::SelectingModel { provider, .. } => Some(*provider),
+            Self::SelectingAnthropicMethod { .. }
+            | Self::EnteringAuthCode { .. }
+            | Self::ExchangingCode { .. } => Some(Provider::Anthropic),
         }
     }
 }
@@ -437,6 +456,8 @@ pub struct App {
     pub oauth_rx: Option<tokio::sync::oneshot::Receiver<Result<OAuthToken, String>>>,
     /// Receiver for async device code request
     pub device_code_rx: Option<tokio::sync::oneshot::Receiver<Result<DeviceCode, String>>>,
+    /// Receiver for async authorization code exchange
+    pub auth_code_rx: Option<tokio::sync::oneshot::Receiver<Result<OAuthToken, anyhow::Error>>>,
     /// Session-scoped cache of validated OAuth tokens (cleared on app restart).
     /// Maps provider storage key (e.g., "github_copilot") to validation status.
     pub validated_tokens: HashMap<String, bool>,
@@ -464,6 +485,7 @@ impl App {
             validation_rx: None,
             oauth_rx: None,
             device_code_rx: None,
+            auth_code_rx: None,
             validated_tokens: HashMap::new(),
         }
     }
@@ -492,6 +514,7 @@ impl App {
             validation_rx: None,
             oauth_rx: None,
             device_code_rx: None,
+            auth_code_rx: None,
             validated_tokens: HashMap::new(),
         }
     }
@@ -862,7 +885,10 @@ impl App {
         }
 
         // No existing credentials - determine how to connect
-        if provider.uses_oauth() {
+        if provider == Provider::Anthropic {
+            // Anthropic - show authentication method selection
+            self.connect = ConnectState::SelectingAnthropicMethod { selected: 0 };
+        } else if provider.uses_oauth() {
             // OAuth providers (Copilot) - start device code flow
             self.start_oauth_flow(provider);
         } else if !provider.requires_api_key() {
@@ -1169,10 +1195,9 @@ impl App {
         // Spawn task to request device code only (not polling yet)
         tokio::spawn(async move {
             let flow = match provider {
-                Provider::Anthropic => DeviceCodeFlow::anthropic(),
                 Provider::GitHubCopilot => DeviceCodeFlow::github_copilot(),
                 _ => {
-                    let _ = tx.send(Err("Provider does not support OAuth".to_string()));
+                    let _ = tx.send(Err("Provider does not support OAuth device code".to_string()));
                     return;
                 }
             };
@@ -1266,10 +1291,9 @@ impl App {
         let dc = device_code.clone();
         tokio::spawn(async move {
             let flow = match provider {
-                Provider::Anthropic => DeviceCodeFlow::anthropic(),
                 Provider::GitHubCopilot => DeviceCodeFlow::github_copilot(),
                 _ => {
-                    let _ = tx.send(Err("Provider does not support OAuth".to_string()));
+                    let _ = tx.send(Err("Provider does not support OAuth device code".to_string()));
                     return;
                 }
             };
@@ -1410,6 +1434,181 @@ impl App {
                 }
             }
             _ => {}
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Anthropic OAuth methods
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// Select Anthropic authentication method.
+    ///
+    /// Called when user selects an option from the Anthropic method selection dialog.
+    pub fn select_anthropic_method(&mut self, selected: usize) {
+        use crate::auth::{AnthropicAuthMethod, AnthropicOAuth};
+
+        match selected {
+            0 => {
+                // Claude Pro/Max OAuth
+                match AnthropicOAuth::new(AnthropicAuthMethod::ClaudeProMax) {
+                    Ok(oauth) => {
+                        // Open browser automatically
+                        if let Err(e) = oauth.open_browser() {
+                            self.toast_error(format!("Could not open browser: {}", e));
+                        }
+
+                        self.connect = ConnectState::EnteringAuthCode {
+                            method: AnthropicAuthMethod::ClaudeProMax,
+                            oauth_handler: oauth,
+                            input: String::new(),
+                            cursor: 0,
+                            error: None,
+                        };
+                    }
+                    Err(e) => {
+                        self.toast_error(format!("OAuth initialization failed: {}", e));
+                        self.connect = ConnectState::None;
+                    }
+                }
+            }
+            1 => {
+                // Create API Key OAuth
+                match AnthropicOAuth::new(AnthropicAuthMethod::CreateApiKey) {
+                    Ok(oauth) => {
+                        // Open browser automatically
+                        if let Err(e) = oauth.open_browser() {
+                            self.toast_error(format!("Could not open browser: {}", e));
+                        }
+
+                        self.connect = ConnectState::EnteringAuthCode {
+                            method: AnthropicAuthMethod::CreateApiKey,
+                            oauth_handler: oauth,
+                            input: String::new(),
+                            cursor: 0,
+                            error: None,
+                        };
+                    }
+                    Err(e) => {
+                        self.toast_error(format!("OAuth initialization failed: {}", e));
+                        self.connect = ConnectState::None;
+                    }
+                }
+            }
+            2 | _ => {
+                // Manual API key entry
+                self.enter_new_credentials();
+            }
+        }
+    }
+
+    /// Submit authorization code for token exchange.
+    pub fn submit_auth_code(&mut self) {
+        if let ConnectState::EnteringAuthCode {
+            method,
+            oauth_handler,
+            input,
+            ..
+        } = std::mem::replace(&mut self.connect, ConnectState::None)
+        {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            self.auth_code_rx = Some(rx);
+
+            // Start async token exchange
+            tokio::spawn(async move {
+                let result = oauth_handler.exchange_code(&input).await;
+                let _ = tx.send(result);
+            });
+
+            self.connect = ConnectState::ExchangingCode { method };
+        }
+    }
+
+    /// Process authorization code exchange results.
+    ///
+    /// Call this in the event loop to check for completed code exchanges.
+    pub fn process_auth_code_exchange(&mut self) {
+        if let Some(rx) = self.auth_code_rx.as_mut() {
+            if let Ok(result) = rx.try_recv() {
+                self.auth_code_rx = None;
+
+                match result {
+                    Ok(token) => {
+                        // Success! Now show model selection
+                        self.connect = ConnectState::SelectingModel {
+                            provider: Provider::Anthropic,
+                            selected: 0,
+                            oauth_token: token,
+                        };
+                    }
+                    Err(e) => {
+                        self.toast_error(format!("Authentication failed: {}", e));
+                        self.connect = ConnectState::None;
+                    }
+                }
+            }
+        }
+    }
+
+    // Auth code input helpers
+    pub fn insert_char_auth_code(&mut self, c: char) {
+        if let ConnectState::EnteringAuthCode {
+            input, cursor, error, ..
+        } = &mut self.connect
+        {
+            input.insert(*cursor, c);
+            *cursor += 1;
+            *error = None;
+        }
+    }
+
+    pub fn backspace_auth_code(&mut self) {
+        if let ConnectState::EnteringAuthCode {
+            input, cursor, error, ..
+        } = &mut self.connect
+        {
+            if *cursor > 0 {
+                *cursor -= 1;
+                input.remove(*cursor);
+                *error = None;
+            }
+        }
+    }
+
+    pub fn delete_auth_code(&mut self) {
+        if let ConnectState::EnteringAuthCode {
+            input, cursor, error, ..
+        } = &mut self.connect
+        {
+            if *cursor < input.len() {
+                input.remove(*cursor);
+                *error = None;
+            }
+        }
+    }
+
+    pub fn move_cursor_left_auth_code(&mut self) {
+        if let ConnectState::EnteringAuthCode { cursor, .. } = &mut self.connect {
+            *cursor = cursor.saturating_sub(1);
+        }
+    }
+
+    pub fn move_cursor_right_auth_code(&mut self) {
+        if let ConnectState::EnteringAuthCode { input, cursor, .. } = &mut self.connect {
+            if *cursor < input.len() {
+                *cursor += 1;
+            }
+        }
+    }
+
+    pub fn move_cursor_start_auth_code(&mut self) {
+        if let ConnectState::EnteringAuthCode { cursor, .. } = &mut self.connect {
+            *cursor = 0;
+        }
+    }
+
+    pub fn move_cursor_end_auth_code(&mut self) {
+        if let ConnectState::EnteringAuthCode { input, cursor, .. } = &mut self.connect {
+            *cursor = input.len();
         }
     }
 }

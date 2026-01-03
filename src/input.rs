@@ -47,6 +47,9 @@ pub fn run_app<B: Backend>(
         // Process async OAuth results (OAuth step 2)
         app.process_oauth();
 
+        // Process authorization code exchange (Anthropic OAuth)
+        app.process_auth_code_exchange();
+
         // Tick OAuth dialog timer
         if last_oauth_tick.elapsed() >= Duration::from_millis(OAUTH_TICK_MS) {
             app.tick_oauth_dialog();
@@ -65,7 +68,7 @@ pub fn run_app<B: Backend>(
         }
 
         // Use timeout for animation: fast polling during animation/streaming/validation/oauth, slower when idle
-        let timeout = if !app.animation.banner_complete || app.is_streaming() || app.validation_rx.is_some() || app.oauth_rx.is_some() || app.device_code_rx.is_some() {
+        let timeout = if !app.animation.banner_complete || app.is_streaming() || app.validation_rx.is_some() || app.oauth_rx.is_some() || app.device_code_rx.is_some() || app.auth_code_rx.is_some() {
             Duration::from_millis(behavior.animation_frame_ms)
         } else {
             // Use shorter timeout to keep cursor blinking smooth
@@ -288,6 +291,21 @@ fn handle_connect_keys(app: &mut App, code: KeyCode) -> HandleResult {
             }
             HandleResult::Continue
         }
+        ConnectState::SelectingAnthropicMethod { selected } => {
+            handle_selecting_anthropic_method_keys(app, code, *selected)
+        }
+        ConnectState::EnteringAuthCode { input, cursor, .. } => {
+            let input = input.clone();
+            let cursor = *cursor;
+            handle_entering_auth_code_keys(app, code, &input, cursor)
+        }
+        ConnectState::ExchangingCode { .. } => {
+            // No input during code exchange, but allow Esc to cancel
+            if code == KeyCode::Esc {
+                app.cancel_connection();
+            }
+            HandleResult::Continue
+        }
         ConnectState::SelectingModel { selected, .. } => {
             handle_model_selection_keys(app, code, *selected)
         }
@@ -460,6 +478,77 @@ fn handle_entering_api_key_keys(
                         app.start_validation(provider, key);
                     }
                 }
+            }
+        }
+        KeyCode::Esc => {
+            app.cancel_connection();
+        }
+        _ => {}
+    }
+    HandleResult::Continue
+}
+
+/// Handle keys in SelectingAnthropicMethod state.
+fn handle_selecting_anthropic_method_keys(app: &mut App, code: KeyCode, selected: usize) -> HandleResult {
+    const OPTION_COUNT: usize = 3;
+
+    match code {
+        KeyCode::Up => {
+            if let ConnectState::SelectingAnthropicMethod { selected } = &mut app.connect {
+                *selected = selected.saturating_sub(1);
+            }
+        }
+        KeyCode::Down => {
+            if let ConnectState::SelectingAnthropicMethod { selected } = &mut app.connect {
+                if *selected < OPTION_COUNT - 1 {
+                    *selected += 1;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            app.select_anthropic_method(selected);
+        }
+        KeyCode::Esc => {
+            app.cancel_connection();
+        }
+        _ => {}
+    }
+    HandleResult::Continue
+}
+
+/// Handle keys in EnteringAuthCode state.
+fn handle_entering_auth_code_keys(
+    app: &mut App,
+    code: KeyCode,
+    input: &str,
+    _cursor: usize,
+) -> HandleResult {
+    match code {
+        KeyCode::Left => {
+            app.move_cursor_left_auth_code();
+        }
+        KeyCode::Right => {
+            app.move_cursor_right_auth_code();
+        }
+        KeyCode::Home => {
+            app.move_cursor_start_auth_code();
+        }
+        KeyCode::End => {
+            app.move_cursor_end_auth_code();
+        }
+        KeyCode::Backspace => {
+            app.backspace_auth_code();
+        }
+        KeyCode::Delete => {
+            app.delete_auth_code();
+        }
+        KeyCode::Char(c) => {
+            app.insert_char_auth_code(c);
+        }
+        KeyCode::Enter => {
+            // Submit the authorization code
+            if !input.is_empty() {
+                app.submit_auth_code();
             }
         }
         KeyCode::Esc => {

@@ -11,6 +11,9 @@ use crate::config::Config;
 use crate::llm::{Provider, COPILOT_MODELS};
 use crate::message::Role;
 
+use super::anthropic_dialogs::{
+    render_anthropic_method_dialog, render_auth_code_entry_dialog, render_exchanging_code_dialog,
+};
 use super::gradient::gradient_color;
 use super::menu::render_menu;
 use super::text::{apply_miami_gradient_to_line, wrap_text};
@@ -255,6 +258,21 @@ pub fn render_connect_dialog(f: &mut Frame, app: &App) {
         ConnectState::OAuthPending { auth_dialog, .. }
         | ConnectState::OAuthPolling { auth_dialog, .. } => {
             auth_dialog.render(f, f.size());
+        }
+        ConnectState::SelectingAnthropicMethod { selected } => {
+            render_anthropic_method_dialog(f, *selected);
+        }
+        ConnectState::EnteringAuthCode {
+            input,
+            cursor,
+            error,
+            method,
+            ..
+        } => {
+            render_auth_code_entry_dialog(f, *method, input, *cursor, error.as_deref());
+        }
+        ConnectState::ExchangingCode { .. } => {
+            render_exchanging_code_dialog(f);
         }
         ConnectState::SelectingModel { selected, .. } => {
             render_model_selection_dialog(f, *selected);
