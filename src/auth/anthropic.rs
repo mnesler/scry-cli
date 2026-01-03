@@ -86,14 +86,19 @@ impl AnthropicOAuth {
             AnthropicAuthMethod::CreateApiKey => AUTH_URL_CONSOLE,
         };
 
+        // URL-encode parameters per OAuth 2.0 spec
+        // Note: scope uses + for spaces (application/x-www-form-urlencoded style)
+        let encoded_redirect = urlencoding::encode(REDIRECT_URI);
+        let encoded_scope = urlencoding::encode(SCOPES).replace("%20", "+");
+
         format!(
             "{}?code=true&client_id={}&response_type=code&redirect_uri={}&scope={}&code_challenge={}&code_challenge_method=S256&state={}",
             base_url,
             CLIENT_ID,
-            REDIRECT_URI,
-            SCOPES,
+            encoded_redirect,
+            encoded_scope,
             self.pkce.challenge,
-            self.pkce.verifier
+            self.pkce.verifier  // verifier is used as state (matches OpenCode)
         )
     }
 
@@ -210,7 +215,19 @@ mod tests {
         assert!(url.starts_with(AUTH_URL_CLAUDE));
         assert!(url.contains(&format!("client_id={}", CLIENT_ID)));
         assert!(url.contains("code_challenge_method=S256"));
-        assert!(url.contains(&format!("scope={}", SCOPES)));
+        
+        // Check for URL-encoded scope (colons encoded as %3A, spaces as +)
+        assert!(url.contains("scope=org%3Acreate_api_key+user%3Aprofile+user%3Ainference"));
+        
+        // Check for URL-encoded redirect_uri
+        assert!(url.contains("redirect_uri=https%3A%2F%2Fconsole.anthropic.com%2Foauth%2Fcode%2Fcallback"));
+        
+        // Verify state parameter exists and is 86 characters (base64url encoded 64 bytes)
+        assert!(url.contains("state="));
+        let state_start = url.find("state=").unwrap() + 6;
+        let state_end = url[state_start..].find('&').unwrap_or(url[state_start..].len());
+        let state = &url[state_start..state_start + state_end];
+        assert_eq!(state.len(), 86);
     }
 
     #[test]
@@ -220,6 +237,10 @@ mod tests {
 
         assert!(url.starts_with(AUTH_URL_CONSOLE));
         assert!(url.contains(&format!("client_id={}", CLIENT_ID)));
+        
+        // Check for URL-encoded parameters
+        assert!(url.contains("scope=org%3Acreate_api_key+user%3Aprofile+user%3Ainference"));
+        assert!(url.contains("redirect_uri=https%3A%2F%2Fconsole.anthropic.com%2Foauth%2Fcode%2Fcallback"));
     }
 
     #[test]

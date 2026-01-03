@@ -21,13 +21,15 @@ pub struct Pkce {
 impl Pkce {
     /// Generate a new PKCE verifier and challenge pair.
     ///
-    /// The verifier is a cryptographically random string of 43-128 characters
-    /// using unreserved characters [A-Z, a-z, 0-9, -, ., _, ~].
+    /// The verifier is a cryptographically random 64-byte value, base64url encoded
+    /// (produces 86 characters). This matches the @openauthjs/openauth library
+    /// used by OpenCode.
     ///
     /// The challenge is computed as: base64url(sha256(verifier))
     pub fn new() -> Result<Self> {
-        // Generate a 43-character verifier (minimum length per RFC 7636)
-        let verifier = Self::generate_verifier(43);
+        // Generate a 64-byte random value, base64url encoded (86 chars)
+        // This matches the @openauthjs/openauth library used by OpenCode
+        let verifier = Self::generate_verifier_base64(64);
         let challenge = Self::compute_challenge(&verifier);
 
         Ok(Self {
@@ -36,17 +38,14 @@ impl Pkce {
         })
     }
 
-    /// Generate a cryptographically random verifier string.
-    fn generate_verifier(length: usize) -> String {
-        const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    /// Generate a cryptographically random verifier as base64url-encoded bytes.
+    /// 
+    /// 64 bytes produces 86 characters when base64url encoded (no padding).
+    /// This matches the OpenCode implementation.
+    fn generate_verifier_base64(num_bytes: usize) -> String {
         let mut rng = rand::thread_rng();
-
-        (0..length)
-            .map(|_| {
-                let idx = rng.gen_range(0..CHARSET.len());
-                CHARSET[idx] as char
-            })
-            .collect()
+        let bytes: Vec<u8> = (0..num_bytes).map(|_| rng.gen()).collect();
+        URL_SAFE_NO_PAD.encode(&bytes)
     }
 
     /// Compute S256 challenge from verifier: base64url(sha256(verifier))
@@ -73,14 +72,14 @@ mod tests {
     fn test_pkce_generation() {
         let pkce = Pkce::new().unwrap();
 
-        // Verifier should be 43 characters
-        assert_eq!(pkce.verifier.len(), 43);
+        // Verifier should be 86 characters (64 bytes base64url encoded)
+        assert_eq!(pkce.verifier.len(), 86);
 
-        // Verifier should only contain valid characters
+        // Verifier should only contain base64url characters
         assert!(pkce
             .verifier
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "-._~".contains(c)));
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
 
         // Challenge should be base64url encoded (43 chars for SHA-256)
         assert_eq!(pkce.challenge.len(), 43);
