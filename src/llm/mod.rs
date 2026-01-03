@@ -54,6 +54,17 @@ pub const COPILOT_MODELS: &[(&str, &str)] = &[
     ("Raptor mini", "raptor-mini"),
 ];
 
+/// Available models for Anthropic (Claude).
+///
+/// Each tuple contains (display_name, api_model_id).
+/// These are the models available through Anthropic's API.
+pub const ANTHROPIC_MODELS: &[(&str, &str)] = &[
+    ("Claude Sonnet 4 (2025-05-14)", "claude-sonnet-4-20250514"),
+    ("Claude 3.5 Sonnet (2024-10-22)", "claude-3-5-sonnet-20241022"),
+    ("Claude 3.5 Haiku (2024-10-22)", "claude-3-5-haiku-20241022"),
+    ("Claude 3 Opus (2024-02-29)", "claude-3-opus-20240229"),
+];
+
 /// Supported LLM providers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]

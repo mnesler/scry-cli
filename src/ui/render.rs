@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::app::{App, ConnectState};
 use crate::config::Config;
-use crate::llm::{Provider, COPILOT_MODELS};
+use crate::llm::{Provider, ANTHROPIC_MODELS, COPILOT_MODELS};
 use crate::message::Role;
 
 use super::anthropic_dialogs::{
@@ -274,8 +274,12 @@ pub fn render_connect_dialog(f: &mut Frame, app: &App) {
         ConnectState::ExchangingCode { .. } => {
             render_exchanging_code_dialog(f);
         }
-        ConnectState::SelectingModel { selected, .. } => {
-            render_model_selection_dialog(f, *selected);
+        ConnectState::SelectingModel {
+            provider,
+            selected,
+            ..
+        } => {
+            render_model_selection_dialog(f, *provider, *selected);
         }
     }
 }
@@ -529,13 +533,14 @@ fn render_validating_dialog(f: &mut Frame, provider_name: &str) {
     f.render_widget(text, inner);
 }
 
-/// Render the model selection dialog for GitHub Copilot.
-fn render_model_selection_dialog(f: &mut Frame, selected: usize) {
+/// Render the model selection dialog.
+fn render_model_selection_dialog(f: &mut Frame, provider: Provider, selected: usize) {
     let area = centered_rect(50, 50, f.size());
     f.render_widget(Clear, area);
 
+    let title = format!(" Select {} Model ", provider.display_name());
     let block = Block::default()
-        .title(" Select Model ")
+        .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan))
         .style(Style::default().bg(Color::Black));
@@ -550,8 +555,15 @@ fn render_model_selection_dialog(f: &mut Frame, selected: usize) {
     ])
     .split(inner);
 
+    // Get the appropriate model list for the provider
+    let models: &[(&str, &str)] = match provider {
+        Provider::Anthropic => ANTHROPIC_MODELS,
+        Provider::GitHubCopilot => COPILOT_MODELS,
+        _ => &[], // Other providers don't use model selection
+    };
+
     // Model options
-    let lines: Vec<Line> = COPILOT_MODELS
+    let lines: Vec<Line> = models
         .iter()
         .enumerate()
         .map(|(i, (display_name, _api_id))| {

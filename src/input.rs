@@ -6,7 +6,7 @@ use ratatui::{backend::Backend, Terminal};
 
 use crate::app::{App, ConnectState, MenuItem};
 use crate::config::Config;
-use crate::llm::{Provider, COPILOT_MODELS};
+use crate::llm::{Provider, ANTHROPIC_MODELS, COPILOT_MODELS};
 use crate::ui;
 use crate::ui::AuthDialogResult;
 
@@ -559,9 +559,22 @@ fn handle_entering_auth_code_keys(
     HandleResult::Continue
 }
 
-/// Handle keys in SelectingModel state (model selection for Copilot).
+/// Handle keys in SelectingModel state.
 fn handle_model_selection_keys(app: &mut App, code: KeyCode, selected: usize) -> HandleResult {
-    let model_count = COPILOT_MODELS.len();
+    // Get provider to determine which model list to use
+    let provider = if let ConnectState::SelectingModel { provider, .. } = &app.connect {
+        *provider
+    } else {
+        return HandleResult::Continue;
+    };
+
+    let models: &[(&str, &str)] = match provider {
+        Provider::Anthropic => ANTHROPIC_MODELS,
+        Provider::GitHubCopilot => COPILOT_MODELS,
+        _ => return HandleResult::Continue,
+    };
+
+    let model_count = models.len();
 
     match code {
         KeyCode::Up => {
@@ -578,7 +591,7 @@ fn handle_model_selection_keys(app: &mut App, code: KeyCode, selected: usize) ->
         }
         KeyCode::Enter => {
             // Get the API model ID for the selected model
-            if let Some((_display_name, api_id)) = COPILOT_MODELS.get(selected) {
+            if let Some((_display_name, api_id)) = models.get(selected) {
                 app.complete_model_selection(api_id);
             }
         }

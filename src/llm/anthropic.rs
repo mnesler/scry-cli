@@ -169,14 +169,26 @@ async fn stream_chat_inner(
         system,
     };
 
-    let response = client
+    // Build request with appropriate authentication headers
+    // OAuth tokens use Authorization header, API keys use x-api-key header
+    let mut request = client
         .post(&url)
-        .header("x-api-key", &config.api_key)
         .header("anthropic-version", ANTHROPIC_VERSION)
-        .header("Content-Type", "application/json")
-        .json(&request_body)
-        .send()
-        .await?;
+        .header("Content-Type", "application/json");
+
+    // Detect if this is an OAuth token or API key
+    // OAuth tokens from Anthropic are JWTs (contain dots), API keys start with "sk-ant-api"
+    if config.api_key.contains('.') {
+        // OAuth token - use Authorization header
+        request = request
+            .header("Authorization", format!("Bearer {}", config.api_key))
+            .header("anthropic-beta", "oauth-2025-04-20");
+    } else {
+        // API key - use x-api-key header
+        request = request.header("x-api-key", &config.api_key);
+    }
+
+    let response = request.json(&request_body).send().await?;
 
     if !response.status().is_success() {
         let status = response.status();
