@@ -176,9 +176,10 @@ async fn stream_chat_inner(
         .header("anthropic-version", ANTHROPIC_VERSION)
         .header("Content-Type", "application/json");
 
-    // Detect if this is an OAuth token or API key
-    // OAuth tokens from Anthropic are JWTs (contain dots), API keys start with "sk-ant-api"
-    if config.api_key.contains('.') {
+    // Detect if this is an OAuth token or API key by prefix
+    // OAuth access tokens start with "sk-ant-oat01-"
+    // API keys start with "sk-ant-api03-"
+    if config.api_key.starts_with("sk-ant-oat01-") || config.api_key.starts_with("sk-ant-ort01-") {
         // OAuth token - use Authorization header
         request = request
             .header("Authorization", format!("Bearer {}", config.api_key))
