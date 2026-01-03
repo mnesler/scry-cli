@@ -191,6 +191,47 @@ impl AnthropicOAuth {
             .context("Failed to parse refresh response")
     }
 
+    /// Convert an OAuth access token to a permanent API key.
+    /// 
+    /// This is used for the "Create API Key" flow where OAuth is used for
+    /// authentication, but a traditional API key is generated for ongoing use.
+    /// 
+    /// Only valid for tokens obtained through the Console OAuth flow
+    /// (AnthropicAuthMethod::CreateApiKey).
+    pub async fn convert_to_api_key(access_token: &str) -> Result<String> {
+        let client = Client::new();
+
+        let response = client
+            .post("https://api.anthropic.com/api/oauth/claude_cli/create_api_key")
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", access_token))
+            .send()
+            .await
+            .context("Failed to create API key")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "API key creation failed ({}): {}",
+                status,
+                body
+            ));
+        }
+
+        #[derive(serde::Deserialize)]
+        struct ApiKeyResponse {
+            raw_key: String,
+        }
+
+        let api_key_response = response
+            .json::<ApiKeyResponse>()
+            .await
+            .context("Failed to parse API key response")?;
+
+        Ok(api_key_response.raw_key)
+    }
+
     /// Open the authorization URL in the user's browser.
     pub fn open_browser(&self) -> Result<()> {
         let url = self.build_auth_url();

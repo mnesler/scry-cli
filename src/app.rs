@@ -81,11 +81,13 @@ pub enum ConnectState {
     ExchangingCode {
         method: crate::auth::AnthropicAuthMethod,
     },
-    /// User is selecting a model after OAuth authentication (Copilot only).
+    /// User is selecting a model after OAuth authentication.
     SelectingModel {
         provider: Provider,
         selected: usize,
         oauth_token: OAuthToken,
+        /// For Anthropic: which auth method was used
+        anthropic_method: Option<crate::auth::AnthropicAuthMethod>,
     },
 }
 
@@ -458,6 +460,9 @@ pub struct App {
     pub device_code_rx: Option<tokio::sync::oneshot::Receiver<Result<DeviceCode, String>>>,
     /// Receiver for async authorization code exchange
     pub auth_code_rx: Option<tokio::sync::oneshot::Receiver<Result<OAuthToken, anyhow::Error>>>,
+    /// Receiver for async API key conversion (Anthropic CreateApiKey flow)
+    /// Contains the receiver and the model name to use
+    pub api_key_conversion_rx: Option<(tokio::sync::oneshot::Receiver<Result<String, anyhow::Error>>, String)>,
     /// Session-scoped cache of validated OAuth tokens (cleared on app restart).
     /// Maps provider storage key (e.g., "github_copilot") to validation status.
     pub validated_tokens: HashMap<String, bool>,
@@ -486,6 +491,7 @@ impl App {
             oauth_rx: None,
             device_code_rx: None,
             auth_code_rx: None,
+            api_key_conversion_rx: None,
             validated_tokens: HashMap::new(),
         }
     }
@@ -515,6 +521,7 @@ impl App {
             oauth_rx: None,
             device_code_rx: None,
             auth_code_rx: None,
+            api_key_conversion_rx: None,
             validated_tokens: HashMap::new(),
         }
     }
@@ -1009,6 +1016,7 @@ impl App {
                             provider,
                             selected: 0,
                             oauth_token,
+                            anthropic_method: None,  // Copilot doesn't use Anthropic auth
                         };
                         return;
                     }
@@ -1067,6 +1075,7 @@ impl App {
                         provider,
                         selected: 0,
                         oauth_token,
+                        anthropic_method: None,  // Copilot doesn't use Anthropic auth
                     };
                 }
             }
@@ -1388,21 +1397,54 @@ impl App {
                 provider,
                 selected: 0,
                 oauth_token: token,
+                anthropic_method: None,
             };
             return;
         }
 
         // For other providers, complete immediately
-        self.finish_oauth_connection(provider, token, provider.default_model());
+        self.finish_oauth_connection(provider, token, provider.default_model(), None);
     }
 
     /// Finish OAuth connection with the selected model.
     ///
     /// Saves credentials and switches to the provider.
-    fn finish_oauth_connection(&mut self, provider: Provider, token: OAuthToken, model: &str) {
-        use crate::auth::{AuthStorage, Credential};
+    /// For Anthropic CreateApiKey flow, converts OAuth token to API key.
+    fn finish_oauth_connection(
+        &mut self,
+        provider: Provider,
+        token: OAuthToken,
+        model: &str,
+        anthropic_method: Option<crate::auth::AnthropicAuthMethod>,
+    ) {
+        use crate::auth::{AnthropicAuthMethod, AnthropicOAuth, AuthStorage, Credential};
 
-        // Save the OAuth credential with selected model
+        // Special handling for Anthropic CreateApiKey method
+        if provider == Provider::Anthropic
+            && anthropic_method == Some(AnthropicAuthMethod::CreateApiKey)
+        {
+            // Convert OAuth token to API key
+            let access_token = token.access_token.clone();
+            let model_str = model.to_string();
+
+            let (tx, rx) = tokio::sync::oneshot::channel();
+
+            tokio::spawn(async move {
+                let result = AnthropicOAuth::convert_to_api_key(&access_token).await;
+                let _ = tx.send(result);
+            });
+
+            // Show converting status
+            self.toast_info("Converting OAuth token to API key...".to_string());
+
+            // Store the receiver for processing in the event loop
+            // We'll need to add a new field for this
+            self.api_key_conversion_rx = Some((rx, model_str));
+            self.connect = ConnectState::None;
+            return;
+        }
+
+        // For OAuth (Claude Pro/Max and Copilot), save the OAuth credential
         if let Ok(mut storage) = AuthStorage::load() {
             let expires_at = token.expires_at();
             storage.set(
@@ -1438,10 +1480,11 @@ impl App {
         if let ConnectState::SelectingModel {
             provider,
             oauth_token,
+            anthropic_method,
             ..
         } = std::mem::take(&mut self.connect)
         {
-            self.finish_oauth_connection(provider, oauth_token, model);
+            self.finish_oauth_connection(provider, oauth_token, model, anthropic_method);
         }
     }
 
@@ -1549,6 +1592,48 @@ impl App {
         }
     }
 
+    /// Process API key conversion results.
+    ///
+    /// Call this in the event loop to check for completed API key conversions.
+    pub fn process_api_key_conversion(&mut self) {
+        if let Some((rx, model)) = self.api_key_conversion_rx.as_mut() {
+            if let Ok(result) = rx.try_recv() {
+                let model = model.clone();
+                self.api_key_conversion_rx = None;
+
+                match result {
+                    Ok(api_key) => {
+                        use crate::auth::{AuthStorage, Credential};
+
+                        // Save as API key credential
+                        if let Ok(mut storage) = AuthStorage::load() {
+                            storage.set(
+                                Provider::Anthropic.storage_key(),
+                                Credential::api_key(&api_key),
+                            );
+                            if let Err(e) = storage.save() {
+                                self.toast_warning(format!("Could not save API key: {}", e));
+                            }
+                        }
+
+                        // Configure and switch to Anthropic with API key
+                        self.llm.config.provider = Provider::Anthropic;
+                        self.llm.config.api_base = Provider::Anthropic.default_api_base().to_string();
+                        self.llm.config.model = model;
+                        self.llm.config.api_key = api_key;
+                        self.llm.config.credential_type = crate::llm::CredentialType::ApiKey;
+                        self.llm.apply_config();
+
+                        self.toast_success("API key created successfully!".to_string());
+                    }
+                    Err(e) => {
+                        self.toast_error(format!("Failed to create API key: {}", e));
+                    }
+                }
+            }
+        }
+    }
+
     /// Process authorization code exchange results.
     ///
     /// Call this in the event loop to check for completed code exchanges.
@@ -1557,6 +1642,13 @@ impl App {
             if let Ok(result) = rx.try_recv() {
                 self.auth_code_rx = None;
 
+                // Get the method from ExchangingCode state
+                let method = if let ConnectState::ExchangingCode { method } = self.connect {
+                    Some(method)
+                } else {
+                    None
+                };
+
                 match result {
                     Ok(token) => {
                         // Success! Now show model selection
@@ -1564,6 +1656,7 @@ impl App {
                             provider: Provider::Anthropic,
                             selected: 0,
                             oauth_token: token,
+                            anthropic_method: method,
                         };
                     }
                     Err(e) => {
@@ -2048,6 +2141,7 @@ mod tests {
             provider: Provider::GitHubCopilot,
             selected: 2,
             oauth_token: token,
+            anthropic_method: None,
         };
         assert!(state.is_active());
         assert_eq!(state.provider(), Some(Provider::GitHubCopilot));
@@ -2067,6 +2161,7 @@ mod tests {
             provider: Provider::GitHubCopilot,
             selected: 0,
             oauth_token: token,
+            anthropic_method: None,
         };
 
         app.complete_model_selection("claude-sonnet-4.5");
@@ -2090,6 +2185,7 @@ mod tests {
             provider: Provider::GitHubCopilot,
             selected: 1,
             oauth_token: token,
+            anthropic_method: None,
         };
 
         app.cancel_connection();
@@ -2148,7 +2244,7 @@ mod tests {
 
         // This will try to save - would need temp dir for full test
         // But we can verify it compiles and the logic is correct
-        app.finish_oauth_connection(Provider::GitHubCopilot, token, "claude-sonnet-4.5");
+        app.finish_oauth_connection(Provider::GitHubCopilot, token, "claude-sonnet-4.5", None);
 
         // Verify state transitioned
         assert!(matches!(app.connect, ConnectState::None));
@@ -2173,6 +2269,7 @@ mod tests {
             provider: Provider::GitHubCopilot,
             selected: 2,
             oauth_token: token,
+            anthropic_method: None,
         };
 
         app.complete_model_selection("claude-haiku-4.5");

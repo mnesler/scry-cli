@@ -50,6 +50,9 @@ pub fn run_app<B: Backend>(
         // Process authorization code exchange (Anthropic OAuth)
         app.process_auth_code_exchange();
 
+        // Process API key conversion (Anthropic CreateApiKey flow)
+        app.process_api_key_conversion();
+
         // Tick OAuth dialog timer
         if last_oauth_tick.elapsed() >= Duration::from_millis(OAUTH_TICK_MS) {
             app.tick_oauth_dialog();
