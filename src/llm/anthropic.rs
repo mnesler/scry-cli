@@ -174,7 +174,7 @@ async fn stream_chat_inner(
     // Build request with appropriate authentication headers
     // OAuth tokens use Authorization header, API keys use x-api-key header
     let mut request = client
-        .post(&format!("{}/v1/messages", config.api_base))
+        .post(&format!("{}/messages", config.api_base))
         .header("anthropic-version", ANTHROPIC_VERSION)
         .header("Content-Type", "application/json");
 
