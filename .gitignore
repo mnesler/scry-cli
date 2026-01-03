@@ -12,3 +12,7 @@ Cargo.lock
 
 # Debug files
 *.pdb
+
+# Insta snapshot tests
+*.snap.new
+*.pending-snap

@@ -1,0 +1,50 @@
+---
+source: tests/anthropic_ui_snapshot_test.rs
+expression: output
+---
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                   ┌ Create API Key Authentication ──────────────────────────────────────────────────────────────────────┐                                   
+                                   │The browser has been opened to the authorization page.                                               │                                   
+                                   │                                                                                                     │                                   
+                                   │1. Authorize the application in your browser                                                         │                                   
+                                   │2. Copy the authorization code shown                                                                 │                                   
+                                   │3. Paste it below and press Enter                                                                    │                                   
+                                   │Authorization Code:                                                                                  │                                   
+                                   │                                                                                                     │                                   
+                                   │  xyz987abc456                                                                                       │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │[Enter] Submit  [Esc] Cancel                                                                         │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘

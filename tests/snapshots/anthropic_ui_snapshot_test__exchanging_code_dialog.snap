@@ -1,0 +1,42 @@
+---
+source: tests/anthropic_ui_snapshot_test.rs
+expression: output
+---
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                    ┌ Authenticating ───────────────────────────────────────────────────┐                                                    
+                                                    │                                                                   │                                                    
+                                                    │                 Exchanging authorization code...                  │                                                    
+                                                    │                                                                   │                                                    
+                                                    │                          Please wait...                           │                                                    
+                                                    │                                                                   │                                                    
+                                                    │                                                                   │                                                    
+                                                    │                                                                   │                                                    
+                                                    │                                                                   │                                                    
+                                                    │                                                                   │                                                    
+                                                    │                                                                   │                                                    
+                                                    └───────────────────────────────────────────────────────────────────┘

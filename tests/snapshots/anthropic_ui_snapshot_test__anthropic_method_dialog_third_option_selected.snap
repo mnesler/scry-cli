@@ -1,0 +1,52 @@
+---
+source: tests/anthropic_ui_snapshot_test.rs
+expression: output
+---
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                                                                                                                                                             
+                                   ┌ Connect to Anthropic ───────────────────────────────────────────────────────────────────────────────┐                                   
+                                   │Select authentication method:                                                                        │                                   
+                                   │                                                                                                     │                                   
+                                   │  Claude Pro/Max (OAuth)                                                                             │                                   
+                                   │  Sign in with Claude Pro or Max subscription                                                        │                                   
+                                   │                                                                                                     │                                   
+                                   │  Create API Key (OAuth)                                                                             │                                   
+                                   │  Create a new API key via OAuth                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │> Enter API Key                                                                                      │                                   
+                                   │  Enter an existing API key manually                                                                 │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │                                                                                                     │                                   
+                                   │[↑↓] Navigate  [Enter] Select  [Esc] Cancel                                                          │                                   
+                                   └─────────────────────────────────────────────────────────────────────────────────────────────────────┘

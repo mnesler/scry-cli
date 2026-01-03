@@ -1701,22 +1701,17 @@ mod tests {
         let mut app = App::new_without_banner();
         app.start_connection(Provider::Anthropic);
 
-        // Should go to either SelectingMethod or ExistingCredential
+        // Should go to either SelectingAnthropicMethod or ExistingCredential
         // depending on whether credentials already exist
         assert!(
-            matches!(
-                app.connect,
-                ConnectState::SelectingMethod {
-                    provider: Provider::Anthropic,
-                    ..
-                }
-            ) || matches!(
-                app.connect,
-                ConnectState::ExistingCredential {
-                    provider: Provider::Anthropic,
-                    ..
-                }
-            )
+            matches!(app.connect, ConnectState::SelectingAnthropicMethod { .. })
+                || matches!(
+                    app.connect,
+                    ConnectState::ExistingCredential {
+                        provider: Provider::Anthropic,
+                        ..
+                    }
+                )
         );
     }
 

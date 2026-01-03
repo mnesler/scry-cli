@@ -652,10 +652,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_api_key_format_check_anthropic() {
-        // Anthropic uses OAuth, not API keys - should fail
+        // Anthropic now supports both OAuth and API keys
+        // Invalid format should fail before network request
         let result = validate_api_key(Provider::Anthropic, "invalid-key").await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("OAuth"));
+        assert!(result.unwrap_err().contains("sk-ant-"));
     }
 
     #[tokio::test]
