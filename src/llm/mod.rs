@@ -225,8 +225,8 @@ pub async fn validate_api_key(provider: Provider, api_key: &str) -> Result<(), S
             // Ollama doesn't need API key validation
             return Ok(());
         }
-        Provider::Anthropic | Provider::GitHubCopilot => {
-            // OAuth providers don't use API keys
+        Provider::GitHubCopilot => {
+            // Copilot uses OAuth only, not API keys
             return Err(format!("{} uses OAuth authentication, not API keys", provider.display_name()));
         }
         _ => {}
@@ -240,8 +240,9 @@ pub async fn validate_api_key(provider: Provider, api_key: &str) -> Result<(), S
     let client = Client::new();
 
     match provider {
+        Provider::Anthropic => validate_anthropic_key(&client, api_key).await,
         Provider::OpenRouter => validate_openrouter_key(&client, api_key).await,
-        Provider::Anthropic | Provider::Ollama | Provider::GitHubCopilot => {
+        Provider::Ollama | Provider::GitHubCopilot => {
             // Already handled above
             unreachable!()
         }
